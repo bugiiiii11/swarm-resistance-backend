@@ -1,14 +1,16 @@
 """
 Web3 API Routes for Swarm Resistance dApp
 Implements the three main endpoints using Moralis HTTP API
+TEMPORARY: Authentication disabled for initial deployment
 """
 
-from fastapi import APIRouter, HTTPException, Depends, Query
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse
 from typing import Optional
 import logging
 from app.services.moralis_service import moralis_service
-from app.services.auth_service import get_current_user
+# Temporarily commented out auth until we implement it
+# from app.services.auth_service import get_current_user
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -19,8 +21,8 @@ router = APIRouter(prefix="/api", tags=["web3"])
 @router.get("/tokens/portfolio")
 async def get_token_portfolio(
     address: str = Query(..., description="Wallet address to fetch token portfolio for"),
-    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)"),
-    current_user: dict = Depends(get_current_user)
+    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)")
+    # Temporarily removed: current_user: dict = Depends(get_current_user)
 ):
     """
     Get token balances for a wallet address with USD pricing
@@ -68,8 +70,8 @@ async def get_token_portfolio(
 @router.get("/nfts/{address}")
 async def get_nft_collections(
     address: str,
-    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)"),
-    current_user: dict = Depends(get_current_user)
+    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)")
+    # Temporarily removed: current_user: dict = Depends(get_current_user)
 ):
     """
     Get NFT collections for a wallet address with metadata
@@ -117,8 +119,8 @@ async def get_nft_collections(
 @router.post("/web3/refresh")
 async def refresh_wallet_data(
     address: str = Query(..., description="Wallet address to refresh data for"),
-    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)"),
-    current_user: dict = Depends(get_current_user)
+    chain: str = Query("polygon", description="Blockchain network (polygon, ethereum, bsc, etc.)")
+    # Temporarily removed: current_user: dict = Depends(get_current_user)
 ):
     """
     Force refresh of wallet data (clears cache and fetches fresh data)
@@ -169,7 +171,7 @@ async def refresh_wallet_data(
         )
 
 @router.get("/web3/cache/stats")
-async def get_cache_stats(current_user: dict = Depends(get_current_user)):
+async def get_cache_stats():
     """
     Get cache statistics for monitoring
     
@@ -195,7 +197,7 @@ async def get_cache_stats(current_user: dict = Depends(get_current_user)):
         )
 
 @router.delete("/web3/cache/clear")
-async def clear_cache(current_user: dict = Depends(get_current_user)):
+async def clear_cache():
     """
     Clear all cached data
     
