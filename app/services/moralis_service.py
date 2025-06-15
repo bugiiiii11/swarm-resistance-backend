@@ -20,7 +20,6 @@ class MoralisService:
         self.base_url = "https://deep-index.moralis.io/api/v2.2"
         self.headers = {
             "X-API-Key": self.api_key,
-            "Content-Type": "application/json",
             "Accept": "application/json"
         }
         
@@ -88,11 +87,18 @@ class MoralisService:
         try:
             raw_data = await self._make_request(endpoint, params)
             
+            # Debug: Log the response structure
+            logger.info(f"Moralis API response type: {type(raw_data)}")
+            logger.info(f"Moralis API response keys: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'List response'}")
+            
             # Process and format the data
             processed_tokens = []
             total_usd_value = 0
             
-            for token in raw_data.get("result", []):
+            # Handle both list and dict responses from Moralis
+            token_list = raw_data if isinstance(raw_data, list) else raw_data.get("result", [])
+            
+            for token in token_list:
                 # Calculate USD value if price data is available
                 balance_wei = int(token.get("balance", "0"))
                 decimals = int(token.get("decimals", 18))
@@ -173,11 +179,18 @@ class MoralisService:
         try:
             raw_data = await self._make_request(endpoint, params)
             
+            # Debug: Log the response structure  
+            logger.info(f"Moralis NFT API response type: {type(raw_data)}")
+            logger.info(f"Moralis NFT API response keys: {list(raw_data.keys()) if isinstance(raw_data, dict) else 'List response'}")
+            
             # Process and organize by collections
             collections = {}
             total_nfts = 0
             
-            for nft in raw_data.get("result", []):
+            # Handle both list and dict responses from Moralis
+            nft_list = raw_data if isinstance(raw_data, list) else raw_data.get("result", [])
+            
+            for nft in nft_list:
                 contract_address = nft.get("token_address")
                 
                 if contract_address not in collections:
