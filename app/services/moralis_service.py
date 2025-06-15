@@ -9,7 +9,11 @@ from typing import Dict, List, Optional, Any
 from datetime import datetime, timedelta
 import json
 import os
+import logging
 from app.config import settings
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class MoralisService:
     def __init__(self):
