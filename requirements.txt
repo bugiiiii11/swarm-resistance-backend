@@ -1,3 +1,6 @@
+# ============================================
+# YOUR PROVEN WORKING BASE (UNCHANGED)
+# ============================================
 fastapi==0.115.12
 uvicorn==0.32.1
 supabase==2.15.2
@@ -10,3 +13,12 @@ python-jose==3.3.0
 passlib==1.7.4
 python-multipart==0.0.19
 requests==2.32.3
+
+# ============================================
+# MEDASHOOTER ADDITIONS (MINIMAL REQUIRED)
+# ============================================
+# RSA Decryption for Unity score submissions
+pycryptodome==3.19.0
+
+# Unity's score algorithm (bit manipulation)
+numpy==1.26.4
