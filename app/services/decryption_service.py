@@ -1,4 +1,4 @@
-# services/decryption_service.py - FIXED RSA key loading
+# services/decryption_service.py - FIXED with better RSA key debugging
 import base64
 import os
 import logging
@@ -27,17 +27,36 @@ class MedaShooterDecryption:
             info_key_env = os.getenv('MEDASHOOTER_INFO_PRIVATE_KEY')
             
             if score_key_env and info_key_env:
-                # Keys stored as base64 encoded environment variables
                 logger.info("🔑 Loading RSA keys from environment variables")
+                logger.info(f"Score key length: {len(score_key_env)} chars")
+                logger.info(f"Info key length: {len(info_key_env)} chars")
                 
-                # Decode base64 keys
-                score_key_content = base64.b64decode(score_key_env).decode('utf-8')
-                info_key_content = base64.b64decode(info_key_env).decode('utf-8')
-                
-                # Import RSA keys
-                self._score_private_key = RSA.importKey(score_key_content)
-                self._info_private_key = RSA.importKey(info_key_content)
-                logger.info("✅ RSA keys loaded from environment variables")
+                try:
+                    # Remove any quotes that Railway might have added
+                    score_key_clean = score_key_env.strip().strip('"').strip("'")
+                    info_key_clean = info_key_env.strip().strip('"').strip("'")
+                    
+                    logger.info(f"Cleaned score key length: {len(score_key_clean)} chars")
+                    logger.info(f"Score key starts with: {score_key_clean[:20]}...")
+                    
+                    # Decode base64 keys
+                    score_key_content = base64.b64decode(score_key_clean).decode('utf-8')
+                    info_key_content = base64.b64decode(info_key_clean).decode('utf-8')
+                    
+                    logger.info(f"Decoded score key starts with: {score_key_content[:30]}...")
+                    
+                    # Import RSA keys
+                    self._score_private_key = RSA.importKey(score_key_content)
+                    self._info_private_key = RSA.importKey(info_key_content)
+                    
+                    logger.info("✅ RSA keys loaded from environment variables")
+                    
+                except base64.binascii.Error as e:
+                    logger.error(f"❌ Base64 decode error: {e}")
+                    raise Exception(f"Base64 decoding failed: {e}")
+                except Exception as e:
+                    logger.error(f"❌ RSA import error: {e}")
+                    raise Exception(f"RSA key import failed: {e}")
                 
             else:
                 # Method 2: From file paths (development/local)
@@ -46,10 +65,12 @@ class MedaShooterDecryption:
                 info_key_path = os.getenv('MEDASHOOTER_INFO_KEY_PATH', 'keys/medashooter_info_privkey.pem')
                 
                 with open(score_key_path, 'r') as f:
-                    self._score_private_key = RSA.importKey(f.read())
+                    score_content = f.read()
+                    self._score_private_key = RSA.importKey(score_content)
                 
                 with open(info_key_path, 'r') as f:
-                    self._info_private_key = RSA.importKey(f.read())
+                    info_content = f.read()
+                    self._info_private_key = RSA.importKey(info_content)
                 
                 logger.info(f"✅ RSA keys loaded from files: {score_key_path}, {info_key_path}")
                 
@@ -144,40 +165,6 @@ class MedaShooterDecryption:
         except Exception as e:
             logger.error(f"❌ Complete decryption failed: {e}")
             raise ValueError(f"Score submission decryption failed: {e}")
-    
-    def validate_decrypted_data(self, data: dict) -> dict:
-        """
-        Validate decrypted data for basic sanity checks
-        
-        Returns:
-            Dict with validation results
-        """
-        errors = []
-        warnings = []
-        
-        # Basic range validations
-        if data["score"] < 0 or data["score"] > 10000000:
-            errors.append(f"Invalid score range: {data['score']}")
-        
-        if data["duration"] < 1 or data["duration"] > 3600:  # Max 1 hour
-            errors.append(f"Invalid duration: {data['duration']} seconds")
-        
-        if data["enemies_spawned"] < 0 or data["enemies_spawned"] > 10000:
-            errors.append(f"Invalid enemies_spawned: {data['enemies_spawned']}")
-        
-        if data["enemies_killed"] > data["enemies_spawned"]:
-            warnings.append("More enemies killed than spawned")
-        
-        # Address format validation
-        address = data["address"].lower()
-        if not address.startswith("0x") or len(address) != 42:
-            errors.append(f"Invalid wallet address format: {address}")
-        
-        return {
-            "valid": len(errors) == 0,
-            "errors": errors,
-            "warnings": warnings
-        }
 
 # Utility function for Unity's score calculation algorithm
 def calculate_shifted_score(raw_score: int) -> int:
@@ -198,30 +185,6 @@ def test_decryption_service():
     try:
         decryption = MedaShooterDecryption()
         print("✅ Decryption service initialized successfully")
-        
-        # Test mock Unity submission format
-        mock_submission = {
-            "hash": "mock_encrypted_score_data",
-            "address": "mock_encrypted_address_data",
-            "delta": "mock_encrypted_duration",
-            "parameter1": "mock_encrypted_enemies_spawned",
-            "parameter2": "mock_encrypted_enemies_killed",
-            "parameter3": "mock_encrypted_waves_completed",
-            "parameter4": "mock_encrypted_travel_distance",
-            "parameter5": "mock_encrypted_perks_collected",
-            "parameter6": "mock_encrypted_coins_collected",
-            "parameter7": "mock_encrypted_shields_collected",
-            "parameter8": "mock_encrypted_killing_spree_mult",
-            "parameter9": "mock_encrypted_killing_spree_duration",
-            "parameter10": "mock_encrypted_max_killing_spree",
-            "parameter11": "mock_encrypted_attack_speed",
-            "parameter12": "mock_encrypted_max_score_per_enemy",
-            "parameter13": "mock_encrypted_max_score_per_enemy_scaled",
-            "parameter14": "mock_encrypted_ability_use_count",
-            "parameter15": "mock_encrypted_enemies_killed_while_killing_spree"
-        }
-        
-        print("📝 Mock submission format validated")
         return True
         
     except Exception as e:

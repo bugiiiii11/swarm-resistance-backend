@@ -141,15 +141,16 @@ async def root():
 async def health_check():
     """Enhanced health check endpoint"""
     try:
-        # Test database connection
-        from app.database import get_db
-        db = next(get_db())
+        # Test database connection - FIXED for asyncpg
+        from app.database import get_db_pool
+        pool = await get_db_pool()
         
-        # Test if we can execute a simple query
-        result = db.execute("SELECT 1").fetchone()
+        async with pool.acquire() as connection:
+            result = await connection.fetchval("SELECT 1")
         
         # Test MedaShooter services
         medashooter_status = "available"
+        rsa_keys_loaded = False
         try:
             from app.services.decryption_service import MedaShooterDecryption
             decryption = MedaShooterDecryption()
@@ -157,7 +158,8 @@ async def health_check():
                 decryption._score_private_key is not None and 
                 decryption._info_private_key is not None
             )
-        except Exception:
+            medashooter_status = "available"
+        except Exception as e:
             medashooter_status = "rsa_keys_missing"
             rsa_keys_loaded = False
         
@@ -176,7 +178,7 @@ async def health_check():
                     "medashooter": medashooter_status,
                     "rsa_decryption": rsa_keys_loaded
                 },
-                "timestamp": "2025-06-17T12:00:00Z"
+                "timestamp": "2025-06-18T12:00:00Z"
             }
         )
     except Exception as e:
@@ -187,7 +189,7 @@ async def health_check():
                 "status": "unhealthy",
                 "message": "API is experiencing issues",
                 "error": str(e),
-                "timestamp": "2025-06-17T12:00:00Z"
+                "timestamp": "2025-06-18T12:00:00Z"
             }
         )
 
