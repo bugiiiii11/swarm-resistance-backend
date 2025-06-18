@@ -1,4 +1,4 @@
-# services/decryption_service.py - MINIMAL FIX with temporary environment file
+# services/decryption_service.py - FINAL FIX with PEM format correction
 import base64
 import os
 import logging
@@ -45,6 +45,30 @@ MEDASHOOTER_INFO_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlDV3d
         except Exception as e:
             logger.error(f"❌ Failed to read temporary environment file: {e}")
             return {}
+
+    def _fix_pem_format(self, pem_content: str) -> str:
+        """Fix corrupted PEM headers/footers that are missing dashes"""
+        lines = pem_content.strip().split('\n')
+        
+        # Fix header - ensure exactly 5 dashes on each side
+        if lines[0].startswith('-----BEGIN RSA PRIVATE KEY') and not lines[0].endswith('-----'):
+            lines[0] = '-----BEGIN RSA PRIVATE KEY-----'
+            logger.info("🔧 Fixed PEM header")
+        
+        # Fix footer - ensure exactly 5 dashes on each side  
+        if lines[-1].startswith('---END RSA PRIVATE KEY') or lines[-1].startswith('----END RSA PRIVATE KEY'):
+            lines[-1] = '-----END RSA PRIVATE KEY-----'
+            logger.info("🔧 Fixed PEM footer")
+        
+        return '\n'.join(lines)
+
+    def _fix_base64_padding(self, base64_string: str) -> str:
+        """Fix base64 padding issues"""
+        missing_padding = len(base64_string) % 4
+        if missing_padding:
+            base64_string += '=' * (4 - missing_padding)
+            logger.info(f"🔧 Added {4 - missing_padding} padding characters")
+        return base64_string
         
     def _load_keys(self):
         """Load RSA private keys securely from environment or files"""
@@ -70,15 +94,27 @@ MEDASHOOTER_INFO_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlDV3d
                     logger.info(f"Cleaned score key length: {len(score_key_clean)} chars")
                     logger.info(f"Score key starts with: {score_key_clean[:20]}...")
                     
-                    # Decode base64 keys
-                    score_key_content = base64.b64decode(score_key_clean).decode('utf-8')
-                    info_key_content = base64.b64decode(info_key_clean).decode('utf-8')
+                    # Fix base64 padding if needed
+                    score_key_padded = self._fix_base64_padding(score_key_clean)
+                    info_key_padded = self._fix_base64_padding(info_key_clean)
                     
-                    logger.info(f"Decoded score key starts with: {score_key_content[:30]}...")
+                    # Decode base64 keys
+                    score_key_content = base64.b64decode(score_key_padded).decode('utf-8')
+                    info_key_content = base64.b64decode(info_key_padded).decode('utf-8')
+                    
+                    logger.info(f"Decoded score key starts with: {score_key_content[:35]}...")
+                    logger.info(f"Decoded score key ends with: {score_key_content[-35:]}")
+                    
+                    # Fix PEM format if corrupted
+                    score_key_fixed = self._fix_pem_format(score_key_content)
+                    info_key_fixed = self._fix_pem_format(info_key_content)
+                    
+                    logger.info(f"Fixed score key starts with: {score_key_fixed[:35]}...")
+                    logger.info(f"Fixed score key ends with: {score_key_fixed[-35:]}")
                     
                     # Import RSA keys
-                    self._score_private_key = RSA.importKey(score_key_content)
-                    self._info_private_key = RSA.importKey(info_key_content)
+                    self._score_private_key = RSA.importKey(score_key_fixed)
+                    self._info_private_key = RSA.importKey(info_key_fixed)
                     
                     logger.info("✅ RSA keys loaded from temporary environment file")
                     
@@ -105,18 +141,21 @@ MEDASHOOTER_INFO_PRIVATE_KEY=LS0tLS1CRUdJTiBSU0EgUFJJVkFURSBLRVktLS0tLQpNSUlDV3d
                         score_key_clean = score_key_env.strip().strip('"').strip("'")
                         info_key_clean = info_key_env.strip().strip('"').strip("'")
                         
-                        logger.info(f"Cleaned score key length: {len(score_key_clean)} chars")
-                        logger.info(f"Score key starts with: {score_key_clean[:20]}...")
+                        # Fix base64 padding if needed
+                        score_key_padded = self._fix_base64_padding(score_key_clean)
+                        info_key_padded = self._fix_base64_padding(info_key_clean)
                         
                         # Decode base64 keys
-                        score_key_content = base64.b64decode(score_key_clean).decode('utf-8')
-                        info_key_content = base64.b64decode(info_key_clean).decode('utf-8')
+                        score_key_content = base64.b64decode(score_key_padded).decode('utf-8')
+                        info_key_content = base64.b64decode(info_key_padded).decode('utf-8')
                         
-                        logger.info(f"Decoded score key starts with: {score_key_content[:30]}...")
+                        # Fix PEM format if corrupted
+                        score_key_fixed = self._fix_pem_format(score_key_content)
+                        info_key_fixed = self._fix_pem_format(info_key_content)
                         
                         # Import RSA keys
-                        self._score_private_key = RSA.importKey(score_key_content)
-                        self._info_private_key = RSA.importKey(info_key_content)
+                        self._score_private_key = RSA.importKey(score_key_fixed)
+                        self._info_private_key = RSA.importKey(info_key_fixed)
                         
                         logger.info("✅ RSA keys loaded from environment variables")
                         
