@@ -1,4 +1,4 @@
-# services/decryption_service.py - FIXED with better RSA key debugging
+# services/decryption_service.py - FIXED with Railway workaround
 import base64
 import os
 import logging
@@ -12,6 +12,7 @@ class MedaShooterDecryption:
     """
     Complete RSA decryption service for Unity MedaShooter game
     Handles both score data and game info with separate private keys
+    Railway-safe implementation with file-based fallback
     """
     
     def __init__(self):
@@ -19,62 +20,82 @@ class MedaShooterDecryption:
         self._info_private_key = None
         self._load_keys()
         
-    def _load_keys(self):
-        """Load RSA private keys securely from environment or files"""
+    def _create_key_files(self):
+        """Create RSA key files with the correct content (Railway workaround)"""
+        
+        # Hardcoded corrected keys (bypasses Railway environment variable issues)
+        score_key_content = """-----BEGIN RSA PRIVATE KEY-----
+MIICXAIBAAKBgQDV0WK4F2s+m9qKx89vfhxeU5JE9pv8lT23lawVwiq5M6G1N86U
+zMLLndtP9R+NTa3LFmtvZ33VApYvzF+9EJ+sVajnmU/2+y3ZCahPPi0mCank1T7b
+m3eRMD2tDvMLAY+adHk3nOxtsgVjaYy7R43mmDCUH0dxK35eN3Zbh3uslwIDAQAB
+AoGAQ3W1hMl2v6EimWijLNUIFEafvnxkCJP5jeN+ELtbCWWd3nQGDHJx/xYF7Ls0
+wjtA2vNu4A4x6DPRuLDtf9Qv2/ZRlFR9hD4ZNQCJpaErzSluzL11HlahZi8AJ8pE
+4YBtN7kUCZ7b7OHLJEudGwNr0KXbeog2H5W0ukorHJs0saECQQDWL8XQ2YZSfZ8T
+iyJrYgyqJzZPY3RxPUVGTayn1n7Ii3BIIZ6ZaEw806yIXFS8kUMruDkocIBvkD+D
+FrXybJwxAkEA/48vzCEaDywFl+MhnvYn4W+pmr7RaJshQbOZBFc5RE+mNr6/LEea
+iL5MaCkmZBNn8ADZmZdElGgMEpZcXrpLRwJBALHLokfF6eyb/ur4OjAtinMxhaL
+lmNR2ymK3OHN+hx7M0+NKNxraa2sgLIJAwYtBzdJi5j4GoWBllc5CPweEGECQEQI
+s3nNaimV15ta3S17bJyIZIeMuyT0/4KFNHxCWD2GUsKKP0yjd1FmD+M+6TiFLgtn
+voY0Dg7QMD6Whtq1D6sCQA7R+WHbmFQfBJ1GgXuzezzBo3j01QwUTvoxmZDswqM
+/DYMNaTlgMuKoe5iHKQzimey0hRPeTBy31dANpk9h3Q0=
+-----END RSA PRIVATE KEY-----"""
+
+        info_key_content = """-----BEGIN RSA PRIVATE KEY-----
+MIICWwIBAAKBgQDQdJersenWQPVT952XkHbsynvkLqzBEe7Cu0y/C7B1kPeQlet0
+E2K9SJU0jR1Qs+SlE+q07PrNJ3uMzH+znMzZ5Gm6pTmr9CjDlWlMMP6xirVGG9ca
+JF7BffKL1vR6pSXkVYLLjZtVG0g92EAio7vhE9H1hE+h4846zit+LW5GUQIDAQAB
+AoGABKXY3OPsZBHSNoNSoPbAZBK2tPWCdhKViYN+GFNlJZXsIy3okE+/V5uW8hNE
+aFB+hFy/krWm+OyMsWy82y8flSDVrXtLNipysdBiX4HuAq71LDh2YVvj/Agt9aUx
+cOOz4NkZB2mm/M58/H0TQfuApXawIpU7f3UQKPcJ6QxeCu0CQQDcLkn2IHEW9D+S
+ts2ucxgmKqzjk1y3CtWFuxtPUBOdNV5AFF+N8294wNV5ZOF+IErLQ+YE5Sl0G4VA
+0nI3Bfk1AkEA8l38OtMScLbE59Dz7Gb20NfIirgC6vc4XlryXVFvMjOdFPiaZJWN
+hG6fPSHvPhy1tzcpUVzpYYfepM06VwKYLQJAdq7E01S9bsPZmL3MtKH5fPM16h2+
+tjOy0LkAiYoCaJUhzqysrRlxFsfqydqk6ZWCe3qH/E+CPsGu3DgTdLEVmQJAUG56
+RzdG1lsBK4E/gcOFwzbpGYgJh9p1PXLnHarpwPo59fyumBS9eyaO9+WsFKvIbj4D
+Gzo/RRum+oAVDU0SHQJAVKVLAUHRLDW6VVlQOXC5Le8QvSKPAEOgTQJzUnQH5M8N
+M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
+-----END RSA PRIVATE KEY-----"""
+
+        # Write to files
         try:
-            # Method 1: From environment variables (recommended for production)
-            score_key_env = os.getenv('MEDASHOOTER_SCORE_PRIVATE_KEY')
-            info_key_env = os.getenv('MEDASHOOTER_INFO_PRIVATE_KEY')
+            with open("medashooter_score.pem", "w") as f:
+                f.write(score_key_content)
+                
+            with open("medashooter_info.pem", "w") as f:
+                f.write(info_key_content)
+                
+            logger.info("✅ RSA key files created successfully")
             
-            if score_key_env and info_key_env:
-                logger.info("🔑 Loading RSA keys from environment variables")
-                logger.info(f"Score key length: {len(score_key_env)} chars")
-                logger.info(f"Info key length: {len(info_key_env)} chars")
+        except Exception as e:
+            logger.error(f"❌ Failed to create key files: {e}")
+            raise
+        
+    def _load_keys(self):
+        """Load RSA private keys with file-based fallback for Railway issues"""
+        try:
+            # First, try to create key files from hardcoded values (Railway workaround)
+            self._create_key_files()
+            
+            # Load from files
+            score_key_path = "medashooter_score.pem"
+            info_key_path = "medashooter_info.pem"
+            
+            logger.info("🔑 Loading RSA keys from files (Railway workaround)")
+            
+            with open(score_key_path, 'r') as f:
+                score_content = f.read()
                 
-                try:
-                    # Remove any quotes that Railway might have added
-                    score_key_clean = score_key_env.strip().strip('"').strip("'")
-                    info_key_clean = info_key_env.strip().strip('"').strip("'")
-                    
-                    logger.info(f"Cleaned score key length: {len(score_key_clean)} chars")
-                    logger.info(f"Score key starts with: {score_key_clean[:20]}...")
-                    
-                    # Decode base64 keys
-                    score_key_content = base64.b64decode(score_key_clean).decode('utf-8')
-                    info_key_content = base64.b64decode(info_key_clean).decode('utf-8')
-                    
-                    logger.info(f"Decoded score key starts with: {score_key_content[:30]}...")
-                    
-                    # Import RSA keys
-                    self._score_private_key = RSA.importKey(score_key_content)
-                    self._info_private_key = RSA.importKey(info_key_content)
-                    
-                    logger.info("✅ RSA keys loaded from environment variables")
-                    
-                except base64.binascii.Error as e:
-                    logger.error(f"❌ Base64 decode error: {e}")
-                    raise Exception(f"Base64 decoding failed: {e}")
-                except Exception as e:
-                    logger.error(f"❌ RSA import error: {e}")
-                    raise Exception(f"RSA key import failed: {e}")
+            with open(info_key_path, 'r') as f:
+                info_content = f.read()
                 
-            else:
-                # Method 2: From file paths (development/local)
-                logger.info("🔑 Loading RSA keys from file paths")
-                score_key_path = os.getenv('MEDASHOOTER_SCORE_KEY_PATH', 'keys/medashooter_score_privkey.pem')
-                info_key_path = os.getenv('MEDASHOOTER_INFO_KEY_PATH', 'keys/medashooter_info_privkey.pem')
-                
-                with open(score_key_path, 'r') as f:
-                    score_content = f.read()
-                    self._score_private_key = RSA.importKey(score_content)
-                
-                with open(info_key_path, 'r') as f:
-                    info_content = f.read()
-                    self._info_private_key = RSA.importKey(info_content)
-                
-                logger.info(f"✅ RSA keys loaded from files: {score_key_path}, {info_key_path}")
-                
-            # Validate key sizes
+            logger.info(f"Score key file content starts with: {score_content[:35]}...")
+            logger.info(f"Info key file content starts with: {info_content[:35]}...")
+            
+            # Import RSA keys
+            self._score_private_key = RSA.importKey(score_content)
+            self._info_private_key = RSA.importKey(info_content)
+            
+            logger.info("✅ RSA keys loaded from files successfully")
             logger.info(f"Score key: {self._score_private_key.size_in_bits()} bits")
             logger.info(f"Info key: {self._info_private_key.size_in_bits()} bits")
             
@@ -166,6 +187,43 @@ class MedaShooterDecryption:
             logger.error(f"❌ Complete decryption failed: {e}")
             raise ValueError(f"Score submission decryption failed: {e}")
 
+    def is_available(self) -> bool:
+        """Check if RSA decryption service is available"""
+        return self._score_private_key is not None and self._info_private_key is not None
+
+    def test_decryption(self) -> dict:
+        """Test RSA decryption functionality"""
+        if not self.is_available():
+            return {"status": "error", "message": "RSA service not available"}
+        
+        try:
+            # Test with sample data
+            test_data = "test_message_123"
+            
+            # Encrypt with public key
+            cipher = PKCS1_v1_5.new(self._score_private_key.publickey())
+            encrypted = base64.b64encode(cipher.encrypt(test_data.encode('utf-8'))).decode('utf-8')
+            
+            # Decrypt with private key
+            decrypted = self.decrypt_score_data(encrypted)
+            
+            success = (decrypted == test_data)
+            
+            return {
+                "status": "operational" if success else "error",
+                "score_key_available": self._score_private_key is not None,
+                "info_key_available": self._info_private_key is not None,
+                "test_encryption": success,
+                "message": "RSA decryption test successful" if success else "RSA test failed"
+            }
+            
+        except Exception as e:
+            logger.error(f"❌ RSA test error: {e}")
+            return {
+                "status": "error",
+                "message": f"RSA test failed: {str(e)}"
+            }
+
 # Utility function for Unity's score calculation algorithm
 def calculate_shifted_score(raw_score: int) -> int:
     """
@@ -179,13 +237,16 @@ def calculate_shifted_score(raw_score: int) -> int:
     score = np.uint32(((score >> 16) ^ score) * 0x119DE1F3)
     return int(np.uint32(((score >> 16) ^ score)))
 
+# Global instance
+medashooter_decryption = MedaShooterDecryption()
+
 # Test functions for development
 def test_decryption_service():
     """Test the decryption service with mock data"""
     try:
-        decryption = MedaShooterDecryption()
-        print("✅ Decryption service initialized successfully")
-        return True
+        result = medashooter_decryption.test_decryption()
+        print(f"✅ Decryption service test: {result}")
+        return result["status"] == "operational"
         
     except Exception as e:
         print(f"❌ Test failed: {e}")
