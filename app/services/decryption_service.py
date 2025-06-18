@@ -1,4 +1,4 @@
-# services/decryption_service.py - RAW PEM FIX (bypasses all base64 issues)
+# services/decryption_service.py - DEBUG VERSION with detailed error tracking
 import base64
 import os
 import logging
@@ -20,9 +20,9 @@ class MedaShooterDecryption:
         self._load_keys()
         
     def _create_temp_env_file(self):
-        """Create PEM files with RAW content (bypassing base64 completely)"""
+        """Create PEM files with RAW content and detailed debugging"""
         
-        # Raw PEM content - bypasses all base64/encoding issues
+        # Correctly decoded PEM content from the original base64
         score_key_pem = """-----BEGIN RSA PRIVATE KEY-----
 MIICXAIBAAKBgQDV0WK4F2s+m9qKx89vfhxeU5JE9pv8lT23lawVwiq5M6G1N86U
 zMLLndtP9R+NTa3LFmtvZ33VApYvzF+9EJ+sVajnmU/2+y3ZCahPPi0mCank1T7b
@@ -55,7 +55,7 @@ Gzo/RRum+oAVDU0SHQJAVKVLAUHRLDW6VVlQOXC5Le8QvSKPAEOgTQJzUnQH5M8N
 M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
 -----END RSA PRIVATE KEY-----"""
         
-        # Write RAW PEM content directly to files (no base64 needed)
+        # Write RAW PEM content directly to files with detailed debugging
         try:
             with open("medashooter_score.pem", "w") as f:
                 f.write(score_key_pem)
@@ -63,16 +63,23 @@ M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
             with open("medashooter_info.pem", "w") as f:
                 f.write(info_key_pem)
                 
-            logger.info("✅ RAW PEM key files created successfully (bypassing base64)")
+            logger.info("✅ RAW PEM key files created successfully")
+            
+            # Debug: Check file contents
+            with open("medashooter_score.pem", "r") as f:
+                written_content = f.read()
+                logger.info(f"🔍 Score file length: {len(written_content)} chars")
+                logger.info(f"🔍 Score file starts: {repr(written_content[:50])}")
+                logger.info(f"🔍 Score file ends: {repr(written_content[-50:])}")
             
         except Exception as e:
             logger.error(f"❌ Failed to create RAW PEM key files: {e}")
             raise
         
     def _load_keys(self):
-        """Load RSA private keys directly from PEM files"""
+        """Load RSA private keys directly from PEM files with detailed debugging"""
         try:
-            # Create PEM files directly (bypassing all base64/environment variable issues)
+            # Create PEM files
             self._create_temp_env_file()
             
             # Load from files directly
@@ -90,23 +97,71 @@ M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
             logger.info(f"Score key file content starts with: {score_content[:35]}...")
             logger.info(f"Info key file content starts with: {info_content[:35]}...")
             
-            # Import RSA keys directly (no base64 decoding needed)
-            self._score_private_key = RSA.importKey(score_content)
-            self._info_private_key = RSA.importKey(info_content)
+            # Debug: Detailed analysis before RSA import
+            logger.info(f"🔍 Score content length: {len(score_content)}")
+            logger.info(f"🔍 Score content type: {type(score_content)}")
+            logger.info(f"🔍 Score has \\r characters: {'\\r' in score_content}")
+            logger.info(f"🔍 Score has \\n characters: {'\\n' in score_content}")
             
+            # Try importing score key with detailed error handling
+            try:
+                logger.info("🔄 Attempting to import score key...")
+                self._score_private_key = RSA.importKey(score_content)
+                logger.info("✅ Score key imported successfully!")
+                
+            except Exception as score_error:
+                logger.error(f"❌ Score key import failed: {type(score_error).__name__}: {score_error}")
+                
+                # Try cleaning the content
+                logger.info("🔄 Trying to clean score key content...")
+                cleaned_score = score_content.strip().replace('\r\n', '\n').replace('\r', '\n')
+                try:
+                    self._score_private_key = RSA.importKey(cleaned_score)
+                    logger.info("✅ Score key imported after cleaning!")
+                except Exception as clean_error:
+                    logger.error(f"❌ Cleaned score key also failed: {clean_error}")
+                    raise score_error
+            
+            # Try importing info key with detailed error handling
+            try:
+                logger.info("🔄 Attempting to import info key...")
+                self._info_private_key = RSA.importKey(info_content)
+                logger.info("✅ Info key imported successfully!")
+                
+            except Exception as info_error:
+                logger.error(f"❌ Info key import failed: {type(info_error).__name__}: {info_error}")
+                
+                # Try cleaning the content
+                logger.info("🔄 Trying to clean info key content...")
+                cleaned_info = info_content.strip().replace('\r\n', '\n').replace('\r', '\n')
+                try:
+                    self._info_private_key = RSA.importKey(cleaned_info)
+                    logger.info("✅ Info key imported after cleaning!")
+                except Exception as clean_error:
+                    logger.error(f"❌ Cleaned info key also failed: {clean_error}")
+                    raise info_error
+            
+            # Success!
             logger.info("✅ RSA keys loaded directly from PEM files successfully")
             logger.info(f"Score key: {self._score_private_key.size_in_bits()} bits")
             logger.info(f"Info key: {self._info_private_key.size_in_bits()} bits")
             
         except Exception as e:
-            logger.error(f"❌ Failed to load RSA keys: {e}")
+            logger.error(f"❌ Failed to load RSA keys: {type(e).__name__}: {e}")
+            
+            # Additional debugging info
+            import sys
+            logger.error(f"🔍 Python version: {sys.version}")
+            try:
+                from Crypto import __version__ as crypto_version
+                logger.error(f"🔍 PyCryptodome version: {crypto_version}")
+            except:
+                logger.error("🔍 Could not get PyCryptodome version")
+            
             raise Exception(f"RSA key loading failed: {e}")
     
     def decrypt_score_data(self, encrypted_value: str) -> str:
-        """
-        Decrypt score and address using score private key
-        Used for: hash (score) and address parameters
-        """
+        """Decrypt score and address using score private key"""
         try:
             cipher = PKCS1_v1_5.new(self._score_private_key)
             encrypted_bytes = base64.b64decode(encrypted_value)
@@ -122,10 +177,7 @@ M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
             raise ValueError(f"Score decryption error: {e}")
     
     def decrypt_info_data(self, encrypted_value: str) -> str:
-        """
-        Decrypt game statistics using info private key
-        Used for: delta and parameter1-15
-        """
+        """Decrypt game statistics using info private key"""
         try:
             cipher = PKCS1_v1_5.new(self._info_private_key)
             encrypted_bytes = base64.b64decode(encrypted_value)
@@ -141,15 +193,7 @@ M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
             raise ValueError(f"Info decryption error: {e}")
     
     def decrypt_score_submission(self, submission: dict) -> dict:
-        """
-        Decrypt complete Unity score submission
-        
-        Args:
-            submission: Dict containing all 17 encrypted parameters from Unity
-            
-        Returns:
-            Dict with all decrypted game data
-        """
+        """Decrypt complete Unity score submission"""
         try:
             decrypted_data = {}
             
@@ -188,10 +232,7 @@ M3ivwXMQXBZ4yLSY4BqWugTNPeB+hW6TRWxrCbFLAA==
 
 # Utility function for Unity's score calculation algorithm
 def calculate_shifted_score(raw_score: int) -> int:
-    """
-    Unity's score calculation algorithm from MedaShooterScore.calculate_score()
-    This matches the exact bit manipulation Unity performs
-    """
+    """Unity's score calculation algorithm"""
     import numpy as np
     
     score = np.uint32(raw_score)
