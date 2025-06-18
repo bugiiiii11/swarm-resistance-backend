@@ -1,4 +1,4 @@
-# app/database.py
+# app/database.py - Updated with MedaShooter tables
 from supabase import create_client, Client
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
@@ -171,6 +171,141 @@ async def init_db():
                     UNIQUE(user_id, wallet_address)
                 );
             ''')
+
+            # ============================================
+            # MEDASHOOTER-SPECIFIC TABLES
+            # ============================================
+            
+            # Raw encrypted data from Unity (Unity compatibility layer)
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_unity_scores (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    encrypted_hash TEXT NOT NULL,           -- RSA encrypted score (score key)
+                    encrypted_address TEXT NOT NULL,        -- RSA encrypted wallet (score key)
+                    encrypted_delta TEXT NOT NULL,          -- Game duration (info key)
+                    encrypted_parameter1 TEXT NOT NULL,     -- enemies_spawned (info key)
+                    encrypted_parameter2 TEXT NOT NULL,     -- enemies_killed (info key)
+                    encrypted_parameter3 TEXT NOT NULL,     -- waves_completed (info key)
+                    encrypted_parameter4 TEXT NOT NULL,     -- travel_distance (info key)
+                    encrypted_parameter5 TEXT NOT NULL,     -- perks_collected (info key)
+                    encrypted_parameter6 TEXT NOT NULL,     -- coins_collected (info key)
+                    encrypted_parameter7 TEXT NOT NULL,     -- shields_collected (info key)
+                    encrypted_parameter8 TEXT NOT NULL,     -- killing_spree_mult (info key)
+                    encrypted_parameter9 TEXT NOT NULL,     -- killing_spree_duration (info key)
+                    encrypted_parameter10 TEXT NOT NULL,    -- max_killing_spree (info key)
+                    encrypted_parameter11 TEXT NOT NULL,    -- attack_speed (info key)
+                    encrypted_parameter12 TEXT NOT NULL,    -- max_score_per_enemy (info key)
+                    encrypted_parameter13 TEXT NOT NULL,    -- max_score_per_enemy_scaled (info key)
+                    encrypted_parameter14 TEXT NOT NULL,    -- ability_use_count (info key)
+                    encrypted_parameter15 TEXT NOT NULL,    -- enemies_killed_while_killing_spree (info key)
+                    raw_submission JSONB NOT NULL,          -- Complete Unity JSON
+                    submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            ''')
+
+            # Processed leaderboard data with decrypted scores
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_scores (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    unity_score_id UUID REFERENCES medashooter_unity_scores(id),
+                    player_address VARCHAR(42) NOT NULL,
+                    final_score INTEGER NOT NULL,
+                    calculated_score INTEGER NOT NULL,      -- Unity's shifted score result
+                    -- Decrypted game statistics (15 parameters)
+                    enemies_killed INTEGER,
+                    enemies_spawned INTEGER,
+                    waves_completed INTEGER,
+                    game_duration INTEGER,
+                    travel_distance INTEGER,
+                    perks_collected INTEGER,
+                    coins_collected INTEGER,
+                    shields_collected INTEGER,
+                    killing_spree_mult INTEGER,
+                    killing_spree_duration INTEGER,
+                    max_killing_spree INTEGER,
+                    attack_speed DECIMAL,
+                    max_score_per_enemy INTEGER,
+                    max_score_per_enemy_scaled INTEGER,
+                    ability_use_count INTEGER,
+                    enemies_killed_while_killing_spree INTEGER,
+                    nft_boosts_used JSONB,                  -- NFT boost snapshot
+                    meda_gas_reward INTEGER DEFAULT 0,
+                    validated BOOLEAN DEFAULT TRUE,
+                    submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            ''')
+
+            # NFT boost tracking and verification
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_nft_boost_usage (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    player_address VARCHAR(42) NOT NULL,
+                    score_id UUID REFERENCES medashooter_scores(id),
+                    hero_nfts INTEGER DEFAULT 0,
+                    weapon_nfts INTEGER DEFAULT 0,
+                    land_nfts INTEGER DEFAULT 0,
+                    total_nfts INTEGER DEFAULT 0,
+                    damage_multiplier INTEGER DEFAULT 0,
+                    fire_rate_bonus INTEGER DEFAULT 0,
+                    score_multiplier INTEGER DEFAULT 0,
+                    health_bonus INTEGER DEFAULT 0,
+                    blockchain_verified BOOLEAN DEFAULT FALSE,
+                    boost_snapshot JSONB
+                );
+            ''')
+
+            # Comprehensive player analytics
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_player_stats (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    player_address VARCHAR(42) UNIQUE NOT NULL,
+                    total_games_played INTEGER DEFAULT 0,
+                    web3_connected_games INTEGER DEFAULT 0,
+                    nft_games_played INTEGER DEFAULT 0,
+                    best_score INTEGER DEFAULT 0,
+                    total_meda_gas_earned INTEGER DEFAULT 0,
+                    first_game_played TIMESTAMP WITH TIME ZONE,
+                    last_game_played TIMESTAMP WITH TIME ZONE,
+                    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            ''')
+
+            # Daily leaderboards for rankings and rewards
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_daily_leaderboards (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    game_date DATE NOT NULL,
+                    player_address VARCHAR(42) NOT NULL,
+                    best_daily_score INTEGER NOT NULL,
+                    daily_rank INTEGER NOT NULL,
+                    nft_boosts_active BOOLEAN DEFAULT FALSE,
+                    meda_gas_earned INTEGER DEFAULT 0,
+                    UNIQUE(game_date, player_address)
+                );
+            ''')
+
+            # Player blacklist for anti-cheat system
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_blacklist (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    player_address VARCHAR(42) UNIQUE NOT NULL,
+                    reason TEXT NOT NULL,
+                    evidence JSONB,
+                    blacklisted_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    active BOOLEAN DEFAULT TRUE
+                );
+            ''')
+
+            # Encrypted anti-cheat reports from Unity
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS medashooter_unity_cheat_reports (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    encrypted_address TEXT NOT NULL,        -- RSA encrypted reported address
+                    raw_report JSONB NOT NULL,
+                    processed BOOLEAN DEFAULT FALSE,
+                    submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            ''')
             
             # Create indexes for better performance
             await connection.execute('''
@@ -200,6 +335,26 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_user_id ON wallet_analytics(user_id);
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_wallet_address ON wallet_analytics(wallet_address);
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_updated_at ON wallet_analytics(updated_at);
+                
+                -- MedaShooter indexes
+                CREATE INDEX IF NOT EXISTS idx_medashooter_unity_scores_submission_time ON medashooter_unity_scores(submission_time);
+                
+                CREATE INDEX IF NOT EXISTS idx_medashooter_scores_player_address ON medashooter_scores(player_address);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_scores_final_score ON medashooter_scores(final_score);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_scores_submission_time ON medashooter_scores(submission_time);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_scores_validated ON medashooter_scores(validated);
+                
+                CREATE INDEX IF NOT EXISTS idx_medashooter_nft_boost_player_address ON medashooter_nft_boost_usage(player_address);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_nft_boost_score_id ON medashooter_nft_boost_usage(score_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_medashooter_player_stats_address ON medashooter_player_stats(player_address);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_player_stats_best_score ON medashooter_player_stats(best_score);
+                
+                CREATE INDEX IF NOT EXISTS idx_medashooter_daily_leaderboards_date ON medashooter_daily_leaderboards(game_date);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_daily_leaderboards_rank ON medashooter_daily_leaderboards(daily_rank);
+                
+                CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_address ON medashooter_blacklist(player_address);
+                CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_active ON medashooter_blacklist(active);
             ''')
             
             # Create updated_at trigger function
@@ -227,8 +382,54 @@ async def init_db():
                     FOR EACH ROW
                     EXECUTE FUNCTION update_updated_at_column();
             ''')
+
+            # ============================================
+            # MEDASHOOTER HELPER FUNCTIONS
+            # ============================================
             
-        logger.info("✅ Database initialized successfully!")
+            # Create helper functions for anti-cheat
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION is_address_blacklisted(check_address TEXT)
+                RETURNS BOOLEAN AS $$
+                BEGIN
+                    RETURN EXISTS (
+                        SELECT 1 FROM medashooter_blacklist 
+                        WHERE player_address = LOWER(check_address) AND active = TRUE
+                    );
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+
+            # Auto-update player stats after score submission
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION update_player_stats_after_score()
+                RETURNS TRIGGER AS $
+                BEGIN
+                    INSERT INTO medashooter_player_stats (
+                        player_address, total_games_played, best_score,
+                        last_game_played
+                    ) VALUES (
+                        NEW.player_address, 1, NEW.final_score,
+                        NEW.submission_time
+                    )
+                    ON CONFLICT (player_address) DO UPDATE SET
+                        total_games_played = medashooter_player_stats.total_games_played + 1,
+                        best_score = GREATEST(medashooter_player_stats.best_score, NEW.final_score),
+                        last_game_played = NEW.submission_time,
+                        updated_at = NOW();
+                    RETURN NEW;
+                END;
+                $ LANGUAGE plpgsql;
+            ''')
+
+            await connection.execute('''
+                DROP TRIGGER IF EXISTS trigger_update_player_stats ON medashooter_scores;
+                CREATE TRIGGER trigger_update_player_stats
+                    AFTER INSERT ON medashooter_scores
+                    FOR EACH ROW EXECUTE FUNCTION update_player_stats_after_score();
+            ''')
+            
+        logger.info("✅ Database initialized successfully with MedaShooter tables!")
         
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {str(e)}")
