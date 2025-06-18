@@ -1,4 +1,4 @@
-# app/database.py - Updated with MedaShooter tables
+# app/database.py - FIXED for asyncpg parameter syntax
 from supabase import create_client, Client
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
@@ -180,25 +180,25 @@ async def init_db():
             await connection.execute('''
                 CREATE TABLE IF NOT EXISTS medashooter_unity_scores (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    encrypted_hash TEXT NOT NULL,           -- RSA encrypted score (score key)
-                    encrypted_address TEXT NOT NULL,        -- RSA encrypted wallet (score key)
-                    encrypted_delta TEXT NOT NULL,          -- Game duration (info key)
-                    encrypted_parameter1 TEXT NOT NULL,     -- enemies_spawned (info key)
-                    encrypted_parameter2 TEXT NOT NULL,     -- enemies_killed (info key)
-                    encrypted_parameter3 TEXT NOT NULL,     -- waves_completed (info key)
-                    encrypted_parameter4 TEXT NOT NULL,     -- travel_distance (info key)
-                    encrypted_parameter5 TEXT NOT NULL,     -- perks_collected (info key)
-                    encrypted_parameter6 TEXT NOT NULL,     -- coins_collected (info key)
-                    encrypted_parameter7 TEXT NOT NULL,     -- shields_collected (info key)
-                    encrypted_parameter8 TEXT NOT NULL,     -- killing_spree_mult (info key)
-                    encrypted_parameter9 TEXT NOT NULL,     -- killing_spree_duration (info key)
-                    encrypted_parameter10 TEXT NOT NULL,    -- max_killing_spree (info key)
-                    encrypted_parameter11 TEXT NOT NULL,    -- attack_speed (info key)
-                    encrypted_parameter12 TEXT NOT NULL,    -- max_score_per_enemy (info key)
-                    encrypted_parameter13 TEXT NOT NULL,    -- max_score_per_enemy_scaled (info key)
-                    encrypted_parameter14 TEXT NOT NULL,    -- ability_use_count (info key)
-                    encrypted_parameter15 TEXT NOT NULL,    -- enemies_killed_while_killing_spree (info key)
-                    raw_submission JSONB NOT NULL,          -- Complete Unity JSON
+                    encrypted_hash TEXT NOT NULL,
+                    encrypted_address TEXT NOT NULL,
+                    encrypted_delta TEXT NOT NULL,
+                    encrypted_parameter1 TEXT NOT NULL,
+                    encrypted_parameter2 TEXT NOT NULL,
+                    encrypted_parameter3 TEXT NOT NULL,
+                    encrypted_parameter4 TEXT NOT NULL,
+                    encrypted_parameter5 TEXT NOT NULL,
+                    encrypted_parameter6 TEXT NOT NULL,
+                    encrypted_parameter7 TEXT NOT NULL,
+                    encrypted_parameter8 TEXT NOT NULL,
+                    encrypted_parameter9 TEXT NOT NULL,
+                    encrypted_parameter10 TEXT NOT NULL,
+                    encrypted_parameter11 TEXT NOT NULL,
+                    encrypted_parameter12 TEXT NOT NULL,
+                    encrypted_parameter13 TEXT NOT NULL,
+                    encrypted_parameter14 TEXT NOT NULL,
+                    encrypted_parameter15 TEXT NOT NULL,
+                    raw_submission JSONB NOT NULL,
                     submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
                 );
             ''')
@@ -210,8 +210,7 @@ async def init_db():
                     unity_score_id UUID REFERENCES medashooter_unity_scores(id),
                     player_address VARCHAR(42) NOT NULL,
                     final_score INTEGER NOT NULL,
-                    calculated_score INTEGER NOT NULL,      -- Unity's shifted score result
-                    -- Decrypted game statistics (15 parameters)
+                    calculated_score INTEGER NOT NULL,
                     enemies_killed INTEGER,
                     enemies_spawned INTEGER,
                     waves_completed INTEGER,
@@ -228,7 +227,7 @@ async def init_db():
                     max_score_per_enemy_scaled INTEGER,
                     ability_use_count INTEGER,
                     enemies_killed_while_killing_spree INTEGER,
-                    nft_boosts_used JSONB,                  -- NFT boost snapshot
+                    nft_boosts_used JSONB,
                     meda_gas_reward INTEGER DEFAULT 0,
                     validated BOOLEAN DEFAULT TRUE,
                     submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -300,7 +299,7 @@ async def init_db():
             await connection.execute('''
                 CREATE TABLE IF NOT EXISTS medashooter_unity_cheat_reports (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    encrypted_address TEXT NOT NULL,        -- RSA encrypted reported address
+                    encrypted_address TEXT NOT NULL,
                     raw_report JSONB NOT NULL,
                     processed BOOLEAN DEFAULT FALSE,
                     submission_time TIMESTAMP WITH TIME ZONE DEFAULT NOW()
@@ -336,23 +335,17 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_wallet_address ON wallet_analytics(wallet_address);
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_updated_at ON wallet_analytics(updated_at);
                 
-                -- MedaShooter indexes
                 CREATE INDEX IF NOT EXISTS idx_medashooter_unity_scores_submission_time ON medashooter_unity_scores(submission_time);
-                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_player_address ON medashooter_scores(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_final_score ON medashooter_scores(final_score);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_submission_time ON medashooter_scores(submission_time);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_validated ON medashooter_scores(validated);
-                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_nft_boost_player_address ON medashooter_nft_boost_usage(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_nft_boost_score_id ON medashooter_nft_boost_usage(score_id);
-                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_player_stats_address ON medashooter_player_stats(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_player_stats_best_score ON medashooter_player_stats(best_score);
-                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_daily_leaderboards_date ON medashooter_daily_leaderboards(game_date);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_daily_leaderboards_rank ON medashooter_daily_leaderboards(daily_rank);
-                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_address ON medashooter_blacklist(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_active ON medashooter_blacklist(active);
             ''')
@@ -383,10 +376,6 @@ async def init_db():
                     EXECUTE FUNCTION update_updated_at_column();
             ''')
 
-            # ============================================
-            # MEDASHOOTER HELPER FUNCTIONS
-            # ============================================
-            
             # Create helper functions for anti-cheat
             await connection.execute('''
                 CREATE OR REPLACE FUNCTION is_address_blacklisted(check_address TEXT)
@@ -403,7 +392,7 @@ async def init_db():
             # Auto-update player stats after score submission
             await connection.execute('''
                 CREATE OR REPLACE FUNCTION update_player_stats_after_score()
-                RETURNS TRIGGER AS $
+                RETURNS TRIGGER AS $$
                 BEGIN
                     INSERT INTO medashooter_player_stats (
                         player_address, total_games_played, best_score,
@@ -419,7 +408,7 @@ async def init_db():
                         updated_at = NOW();
                     RETURN NEW;
                 END;
-                $ LANGUAGE plpgsql;
+                $$ LANGUAGE plpgsql;
             ''')
 
             await connection.execute('''
@@ -435,7 +424,7 @@ async def init_db():
         logger.error(f"❌ Database initialization failed: {str(e)}")
         raise
 
-# Helper functions for database operations
+# Helper functions for database operations - FIXED for asyncpg
 async def execute_query(query: str, *args):
     """Execute a single query and return results"""
     try:

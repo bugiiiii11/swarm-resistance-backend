@@ -1,4 +1,4 @@
-# services/decryption_service.py
+# services/decryption_service.py - FIXED RSA key loading
 import base64
 import os
 import logging
@@ -28,19 +28,20 @@ class MedaShooterDecryption:
             
             if score_key_env and info_key_env:
                 # Keys stored as base64 encoded environment variables
-                if score_key_env.startswith('LS0t'):  # base64 encoded
-                    score_key_content = base64.b64decode(score_key_env).decode('utf-8')
-                    info_key_content = base64.b64decode(info_key_env).decode('utf-8')
-                else:
-                    score_key_content = score_key_env
-                    info_key_content = info_key_env
+                logger.info("🔑 Loading RSA keys from environment variables")
                 
+                # Decode base64 keys
+                score_key_content = base64.b64decode(score_key_env).decode('utf-8')
+                info_key_content = base64.b64decode(info_key_env).decode('utf-8')
+                
+                # Import RSA keys
                 self._score_private_key = RSA.importKey(score_key_content)
                 self._info_private_key = RSA.importKey(info_key_content)
                 logger.info("✅ RSA keys loaded from environment variables")
                 
             else:
                 # Method 2: From file paths (development/local)
+                logger.info("🔑 Loading RSA keys from file paths")
                 score_key_path = os.getenv('MEDASHOOTER_SCORE_KEY_PATH', 'keys/medashooter_score_privkey.pem')
                 info_key_path = os.getenv('MEDASHOOTER_INFO_KEY_PATH', 'keys/medashooter_info_privkey.pem')
                 
