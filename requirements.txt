@@ -22,3 +22,12 @@ pycryptodome==3.19.0
 
 # Unity's score algorithm (bit manipulation)
 numpy==1.26.4
+
+# ============================================
+# WEB3 INTEGRATION (NEW)
+# ============================================
+# Web3.py for direct smart contract calls
+web3==6.15.1
+
+# Simple caching (optional, lightweight)
+cachetools==5.3.2

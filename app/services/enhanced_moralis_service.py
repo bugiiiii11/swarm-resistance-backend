@@ -1,30 +1,25 @@
-# app/services/enhanced_moralis_service.py - SMART CONTRACT VERSION
-import aiohttp
-import asyncio
+# services/enhanced_moralis_service.py - UPDATED with Web3.py integration
 import logging
 from typing import Dict, List, Optional, Any
-import os
-import json
+import asyncio
+
+# Import ABIs
+from api.contract_interfaces.heroes_abi import ABI as HEROES_ABI
+from api.contract_interfaces.weapon_abi import ABI as WEAPONS_ABI
+
+# Import our new Web3 service
+from .web3_service import web3_service, Web3ServiceException
 
 logger = logging.getLogger(__name__)
 
 class EnhancedMoralisService:
     """
-    Enhanced Moralis service using SMART CONTRACT CALLS (like your original Django backend)
-    Calls tokensOfOwner, getTokenInfo, getAttribs directly via Moralis runContractFunction
+    Enhanced service that replicates your original Django backend logic
+    Now uses Web3.py for direct smart contract calls instead of Moralis
     """
     
     def __init__(self):
-        self.api_key = os.getenv('MORALIS_API_KEY')
-        self.base_url = "https://deep-index.moralis.io/api/v2.2"
         self.chain = "polygon"
-        
-        # Contract addresses from your original system
-        self.contracts = {
-            'heroes': '0x27331bbfe94d1b8518816462225b16622ac74e2e',
-            'weapons': '0x31dd72d810b34c339f2ce9119e2ebfbb9926694a', 
-            'lands': '0xaae02c81133d865d543df02b1e458de2279c4a5b'
-        }
         
         # Weapon mappings from your original weapon.py
         self.WEAPON_NAME_MAPPING = {
@@ -66,189 +61,7 @@ class EnhancedMoralisService:
             }
         }
         
-        if not self.api_key:
-            logger.error("❌ MORALIS_API_KEY not found in environment variables")
-        else:
-            logger.info("✅ Enhanced Moralis service initialized - SMART CONTRACT VERSION")
-    
-    async def _call_contract_function(self, contract_address: str, function_name: str, params: List = None) -> Any:
-        """Call smart contract function via Moralis runContractFunction API"""
-        
-        # Updated endpoint for contract function calls
-        endpoint = f"/{contract_address}/function"
-        
-        headers = {
-            'X-API-Key': self.api_key,
-            'Accept': 'application/json',
-            'Content-Type': 'application/json'
-        }
-        
-        # Build the function call payload
-        payload = {
-            "chain": self.chain,
-            "function_name": function_name,
-            "params": params or []
-        }
-        
-        url = f"{self.base_url}{endpoint}"
-        
-        try:
-            logger.debug(f"🔗 Calling contract function: {function_name}")
-            logger.debug(f"🔗 URL: {url}")
-            logger.debug(f"🔗 Payload: {payload}")
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, headers=headers, json=payload) as response:
-                    if response.status == 200:
-                        result = await response.json()
-                        logger.debug(f"✅ Contract call {function_name} result: {result}")
-                        return result
-                    else:
-                        error_text = await response.text()
-                        logger.error(f"❌ Contract call failed {response.status}: {error_text}")
-                        return None
-        except Exception as e:
-            logger.error(f"❌ Contract call failed: {e}")
-            return None
-    
-    async def _get_tokens_of_owner(self, contract_address: str, owner_address: str) -> List[int]:
-        """Get all token IDs owned by address using tokensOfOwner (like your original backend)"""
-        try:
-            result = await self._call_contract_function(
-                contract_address,
-                'tokensOfOwner',
-                [owner_address]
-            )
-            
-            if result and isinstance(result, list):
-                return [int(token_id) for token_id in result]
-            elif result and isinstance(result, dict):
-                # Sometimes Moralis wraps the result
-                actual_result = result.get('result', result)
-                if isinstance(actual_result, list):
-                    return [int(token_id) for token_id in actual_result]
-            
-            return []
-            
-        except Exception as e:
-            logger.error(f"Error getting tokens of owner: {e}")
-            return []
-    
-    async def _get_hero_attributes(self, token_id: int) -> Dict:
-        """Get hero attributes using getAttribs (exactly like your card_distribution.py)"""
-        try:
-            # Call getAttribs function - returns (sec, ano, inn)
-            attribs_result = await self._call_contract_function(
-                self.contracts['heroes'],
-                'getAttribs',
-                [str(token_id)]
-            )
-            
-            if attribs_result and len(attribs_result) >= 3:
-                sec = int(attribs_result[0]) if attribs_result[0] else 50
-                ano = int(attribs_result[1]) if attribs_result[1] else 50
-                inn = int(attribs_result[2]) if attribs_result[2] else 50
-                
-                return {"sec": sec, "ano": ano, "inn": inn}
-            
-            logger.warning(f"Invalid getAttribs result for hero {token_id}: {attribs_result}")
-            return {"sec": 50, "ano": 50, "inn": 50}  # Fallback
-            
-        except Exception as e:
-            logger.error(f"Error getting hero attributes for {token_id}: {e}")
-            return {"sec": 50, "ano": 50, "inn": 50}  # Fallback
-    
-    async def _get_hero_info(self, token_id: int) -> Dict:
-        """Get hero token info using getTokenInfo (like your card_distribution.py)"""
-        try:
-            # Call getTokenInfo function
-            token_info = await self._call_contract_function(
-                self.contracts['heroes'],
-                'getTokenInfo', 
-                [str(token_id)]
-            )
-            
-            if token_info and len(token_info) >= 2:
-                season_card_id = int(token_info[0]) if token_info[0] else 0
-                serial_number = int(token_info[1]) if token_info[1] else 0
-                
-                # Decode card data like your original decode_card_data function
-                card_type = season_card_id // 1000
-                season_id = (season_card_id % 1000) // 10
-                card_season_collection_id = season_card_id % 10
-                
-                return {
-                    "season_card_id": season_card_id,
-                    "serial_number": serial_number,
-                    "card_type": card_type,
-                    "season_id": season_id, 
-                    "card_season_collection_id": card_season_collection_id
-                }
-            
-            return {"season_card_id": 0, "serial_number": 0, "card_type": 0, "season_id": 0, "card_season_collection_id": 0}
-            
-        except Exception as e:
-            logger.error(f"Error getting hero info for {token_id}: {e}")
-            return {"season_card_id": 0, "serial_number": 0, "card_type": 0, "season_id": 0, "card_season_collection_id": 0}
-    
-    async def _get_weapon_attributes(self, token_id: int) -> Dict:
-        """Get weapon attributes using getAttribs (exactly like your weapon.py)"""
-        try:
-            # Call getAttribs function - returns (security, anonymity, innovation)
-            attribs_result = await self._call_contract_function(
-                self.contracts['weapons'],
-                'getAttribs',
-                [str(token_id)]
-            )
-            
-            if attribs_result and len(attribs_result) >= 3:
-                security = int(attribs_result[0]) if attribs_result[0] else 60
-                anonymity = int(attribs_result[1]) if attribs_result[1] else 60
-                innovation = int(attribs_result[2]) if attribs_result[2] else 60
-                
-                return {"security": security, "anonymity": anonymity, "innovation": innovation}
-            
-            logger.warning(f"Invalid getAttribs result for weapon {token_id}: {attribs_result}")
-            return {"security": 60, "anonymity": 60, "innovation": 60}  # Fallback
-            
-        except Exception as e:
-            logger.error(f"Error getting weapon attributes for {token_id}: {e}")
-            return {"security": 60, "anonymity": 60, "innovation": 60}  # Fallback
-    
-    async def _get_weapon_info(self, token_id: int) -> Dict:
-        """Get weapon info using getTokenInfo (exactly like your weapon.py)"""
-        try:
-            # Call getTokenInfo function - returns (weapon_tier, weapon_type, weapon_subtype, category, serial_number)
-            token_info = await self._call_contract_function(
-                self.contracts['weapons'],
-                'getTokenInfo',
-                [str(token_id)]
-            )
-            
-            if token_info and len(token_info) >= 5:
-                weapon_tier = int(token_info[0]) if token_info[0] else 1
-                weapon_type = int(token_info[1]) if token_info[1] else 1
-                weapon_subtype = int(token_info[2]) if token_info[2] else 1
-                category = int(token_info[3]) if token_info[3] else 1
-                serial_number = int(token_info[4]) if token_info[4] else 1
-                
-                # Get weapon name using your original mapping
-                weapon_name = self._get_weapon_name(weapon_tier, weapon_type, weapon_subtype, category)
-                
-                return {
-                    "weapon_tier": weapon_tier,
-                    "weapon_type": weapon_type,
-                    "weapon_subtype": weapon_subtype,
-                    "category": category,
-                    "serial_number": serial_number,
-                    "weapon_name": weapon_name
-                }
-            
-            return {"weapon_tier": 1, "weapon_type": 1, "weapon_subtype": 1, "category": 1, "serial_number": 1, "weapon_name": "Unknown Weapon"}
-            
-        except Exception as e:
-            logger.error(f"Error getting weapon info for {token_id}: {e}")
-            return {"weapon_tier": 1, "weapon_type": 1, "weapon_subtype": 1, "category": 1, "serial_number": 1, "weapon_name": "Unknown Weapon"}
+        logger.info("✅ Enhanced Moralis service initialized with Web3.py backend")
     
     def _get_weapon_name(self, weapon_tier: int, weapon_type: int, weapon_subtype: int, category: int) -> str:
         """Get weapon name using your original mapping logic"""
@@ -261,14 +74,14 @@ class EnhancedMoralisService:
     
     async def get_heroes_for_unity(self, address: str) -> Dict:
         """
-        Get Heroes NFTs with Unity-compatible format using SMART CONTRACT CALLS
+        Get Heroes NFTs with Unity-compatible format using Web3.py
         Returns exact format Unity expects: paginated with "sec"/"ano"/"inn"
         """
         try:
-            logger.info(f"🦸 Fetching Heroes for {address} using SMART CONTRACT CALLS")
+            logger.info(f"🦸 Fetching Heroes for {address} using Web3.py")
             
-            # Get all token IDs owned by this address (like your original tokensOfOwner call)
-            token_ids = await self._get_tokens_of_owner(self.contracts['heroes'], address)
+            # Get all token IDs owned by this address
+            token_ids = await web3_service.get_tokens_of_owner('heroes', HEROES_ABI, address)
             
             if not token_ids:
                 logger.info(f"No heroes found for {address}")
@@ -278,11 +91,11 @@ class EnhancedMoralisService:
             
             for token_id in token_ids:
                 try:
-                    # Get attributes using your original getAttribs call
-                    attributes = await self._get_hero_attributes(token_id)
+                    # Get attributes and token info in parallel
+                    attributes_task = web3_service.get_token_attributes('heroes', HEROES_ABI, token_id)
+                    info_task = web3_service.get_token_info('heroes', HEROES_ABI, token_id)
                     
-                    # Get token info using your original getTokenInfo call
-                    hero_info = await self._get_hero_info(token_id)
+                    attributes, hero_info = await asyncio.gather(attributes_task, info_task)
                     
                     # Determine fraction based on your original logic
                     if token_id >= 1 and token_id <= 3000:
@@ -333,23 +146,31 @@ class EnhancedMoralisService:
                 "next": None
             }
             
-            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with LIVE SMART CONTRACT DATA")
+            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with live blockchain attributes")
             return result
             
+        except ValueError as e:
+            # Address validation error - client error
+            logger.error(f"❌ Address validation error: {e}")
+            raise ValueError(str(e))
+        except Web3ServiceException as e:
+            # Web3 service error - server error
+            logger.error(f"❌ Web3 service error: {e}")
+            raise Web3ServiceException(str(e))
         except Exception as e:
-            logger.error(f"❌ Error fetching heroes: {e}")
-            return {"results": [], "count": 0, "next": None, "error": str(e)}
+            logger.error(f"❌ Unexpected error fetching heroes: {e}")
+            raise Web3ServiceException(f"Unexpected error: {e}")
     
     async def get_weapons_for_unity(self, address: str) -> List[Dict]:
         """
-        Get Weapons NFTs with Unity-compatible format using SMART CONTRACT CALLS
+        Get Weapons NFTs with Unity-compatible format using Web3.py
         Returns exact format Unity expects: direct array with "security"/"anonymity"/"innovation"
         """
         try:
-            logger.info(f"⚔️ Fetching Weapons for {address} using SMART CONTRACT CALLS")
+            logger.info(f"⚔️ Fetching Weapons for {address} using Web3.py")
             
-            # Get all token IDs owned by this address (like your original tokensOfOwner call)
-            token_ids = await self._get_tokens_of_owner(self.contracts['weapons'], address)
+            # Get all token IDs owned by this address
+            token_ids = await web3_service.get_tokens_of_owner('weapons', WEAPONS_ABI, address)
             
             if not token_ids:
                 logger.info(f"No weapons found for {address}")
@@ -359,19 +180,27 @@ class EnhancedMoralisService:
             
             for token_id in token_ids:
                 try:
-                    # Get attributes using your original getAttribs call
-                    attributes = await self._get_weapon_attributes(token_id)
+                    # Get attributes and weapon info in parallel
+                    attributes_task = web3_service.get_token_attributes('weapons', WEAPONS_ABI, token_id)
+                    info_task = web3_service.get_token_info('weapons', WEAPONS_ABI, token_id)
                     
-                    # Get weapon info using your original getTokenInfo call  
-                    weapon_info = await self._get_weapon_info(token_id)
+                    attributes, weapon_info = await asyncio.gather(attributes_task, info_task)
+                    
+                    # Get weapon name using your original mapping
+                    weapon_name = self._get_weapon_name(
+                        weapon_info["weapon_tier"],
+                        weapon_info["weapon_type"],
+                        weapon_info["weapon_subtype"],
+                        weapon_info["category"]
+                    )
                     
                     # Create Unity-compatible weapon object (exact format from your docs)
                     weapon = {
                         "id": token_id,
                         "bc_id": token_id,
                         "owner_address": address.lower(),
-                        "contract_address": self.contracts['weapons'].lower(),
-                        "weapon_name": weapon_info["weapon_name"],
+                        "contract_address": web3_service.contract_addresses['weapons'].lower(),
+                        "weapon_name": weapon_name,
                         "security": attributes["security"],      # Unity expects "security" (full word)
                         "anonymity": attributes["anonymity"],    # Unity expects "anonymity" (full word)
                         "innovation": attributes["innovation"],  # Unity expects "innovation" (full word)
@@ -380,18 +209,26 @@ class EnhancedMoralisService:
                     }
                     
                     weapons.append(weapon)
-                    logger.debug(f"✅ Weapon {token_id} ({weapon_info['weapon_name']}): security={attributes['security']}, anonymity={attributes['anonymity']}, innovation={attributes['innovation']}")
+                    logger.debug(f"✅ Weapon {token_id} ({weapon_name}): security={attributes['security']}, anonymity={attributes['anonymity']}, innovation={attributes['innovation']}")
                     
                 except Exception as e:
                     logger.error(f"Error processing weapon {token_id}: {e}")
                     continue
             
-            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons with LIVE SMART CONTRACT DATA")
+            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons with live blockchain attributes")
             return weapons
             
+        except ValueError as e:
+            # Address validation error - client error
+            logger.error(f"❌ Address validation error: {e}")
+            raise ValueError(str(e))
+        except Web3ServiceException as e:
+            # Web3 service error - server error
+            logger.error(f"❌ Web3 service error: {e}")
+            raise Web3ServiceException(str(e))
         except Exception as e:
-            logger.error(f"❌ Error fetching weapons: {e}")
-            return []
+            logger.error(f"❌ Unexpected error fetching weapons: {e}")
+            raise Web3ServiceException(f"Unexpected error: {e}")
     
     async def get_enhanced_player_data(self, address: str, chain: str = "polygon") -> Dict:
         """
@@ -446,15 +283,17 @@ class EnhancedMoralisService:
                 "timestamp": int(asyncio.get_event_loop().time())
             }
             
+        except ValueError as e:
+            # Address validation error - client error
+            logger.error(f"❌ Address validation error: {e}")
+            raise ValueError(str(e))
+        except Web3ServiceException as e:
+            # Web3 service error - server error  
+            logger.error(f"❌ Web3 service error: {e}")
+            raise Web3ServiceException(str(e))
         except Exception as e:
-            logger.error(f"❌ Error getting enhanced player data: {e}")
-            return {
-                "address": address.lower(),
-                "error": str(e),
-                "nfts": {"heroes": {"results": [], "count": 0}, "weapons": [], "lands": []},
-                "counts": {"heroes": 0, "weapons": 0, "lands": 0, "total": 0},
-                "boosts": {"damage_multiplier": 0, "fire_rate_bonus": 0, "score_multiplier": 0, "health_bonus": 0}
-            }
+            logger.error(f"❌ Unexpected error getting enhanced player data: {e}")
+            raise Web3ServiceException(f"Unexpected error: {e}")
 
 # Create global instance
 enhanced_moralis_service = EnhancedMoralisService()
