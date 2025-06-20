@@ -1,16 +1,78 @@
-# services/enhanced_moralis_service.py - UPDATED with Web3.py integration
+# services/enhanced_moralis_service.py - QUICK FIX with inline ABIs
 import logging
 from typing import Dict, List, Optional, Any
 import asyncio
-
-# Import ABIs
-from api.contract_interfaces.heroes_abi import ABI as HEROES_ABI
-from api.contract_interfaces.weapon_abi import ABI as WEAPONS_ABI
 
 # Import our new Web3 service
 from .web3_service import web3_service, Web3ServiceException
 
 logger = logging.getLogger(__name__)
+
+# Minimal ABIs - just the functions we need
+HEROES_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "_owner", "type": "address"}],
+        "name": "tokensOfOwner",
+        "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
+        "name": "getAttribs",
+        "outputs": [
+            {"internalType": "uint256", "name": "_sec", "type": "uint256"},
+            {"internalType": "uint256", "name": "_ano", "type": "uint256"},
+            {"internalType": "uint256", "name": "_inn", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
+        "name": "getTokenInfo",
+        "outputs": [
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
+
+WEAPONS_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "_owner", "type": "address"}],
+        "name": "tokensOfOwner",
+        "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
+        "name": "getAttribs",
+        "outputs": [
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [{"internalType": "uint256", "name": "_tokenId", "type": "uint256"}],
+        "name": "getTokenInfo",
+        "outputs": [
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"},
+            {"internalType": "uint256", "name": "", "type": "uint256"}
+        ],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
 
 class EnhancedMoralisService:
     """
