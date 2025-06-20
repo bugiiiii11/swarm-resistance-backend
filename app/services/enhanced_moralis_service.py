@@ -1,4 +1,4 @@
-# app/services/enhanced_moralis_service.py - FIXED VERSION
+# app/services/enhanced_moralis_service.py - SMART CONTRACT VERSION
 import aiohttp
 import asyncio
 import logging
@@ -10,8 +10,8 @@ logger = logging.getLogger(__name__)
 
 class EnhancedMoralisService:
     """
-    Fixed Enhanced Moralis service using proper Moralis Web2 API endpoints
-    Uses NFT endpoints instead of contract function calls for better reliability
+    Enhanced Moralis service using SMART CONTRACT CALLS (like your original Django backend)
+    Calls tokensOfOwner, getTokenInfo, getAttribs directly via Moralis runContractFunction
     """
     
     def __init__(self):
@@ -69,79 +69,186 @@ class EnhancedMoralisService:
         if not self.api_key:
             logger.error("❌ MORALIS_API_KEY not found in environment variables")
         else:
-            logger.info("✅ Enhanced Moralis service initialized - FIXED VERSION")
+            logger.info("✅ Enhanced Moralis service initialized - SMART CONTRACT VERSION")
     
-    async def _make_moralis_request(self, endpoint: str, params: dict = None) -> Optional[dict]:
-        """Make HTTP request to Moralis API with proper error handling"""
-        url = f"{self.base_url}{endpoint}"
+    async def _call_contract_function(self, contract_address: str, function_name: str, params: List = None) -> Any:
+        """Call smart contract function via Moralis runContractFunction API"""
+        
+        # Updated endpoint for contract function calls
+        endpoint = f"/{contract_address}/function"
+        
         headers = {
             'X-API-Key': self.api_key,
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
         }
         
+        # Build the function call payload
+        payload = {
+            "chain": self.chain,
+            "function_name": function_name,
+            "params": params or []
+        }
+        
+        url = f"{self.base_url}{endpoint}"
+        
         try:
+            logger.debug(f"🔗 Calling contract function: {function_name}")
+            logger.debug(f"🔗 URL: {url}")
+            logger.debug(f"🔗 Payload: {payload}")
+            
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, headers=headers, params=params) as response:
+                async with session.post(url, headers=headers, json=payload) as response:
                     if response.status == 200:
                         result = await response.json()
-                        logger.debug(f"✅ Moralis API call successful: {endpoint}")
+                        logger.debug(f"✅ Contract call {function_name} result: {result}")
                         return result
                     else:
                         error_text = await response.text()
-                        logger.error(f"❌ Moralis API call failed {response.status}: {error_text}")
+                        logger.error(f"❌ Contract call failed {response.status}: {error_text}")
                         return None
         except Exception as e:
-            logger.error(f"❌ Moralis API request failed: {e}")
+            logger.error(f"❌ Contract call failed: {e}")
             return None
     
-    async def _get_nfts_by_contract(self, wallet_address: str, contract_address: str) -> List[Dict]:
-        """Get NFTs for a specific contract using Moralis NFT API"""
-        endpoint = f"/{wallet_address}/nft"
-        params = {
-            "chain": self.chain,
-            "format": "decimal",
-            "token_addresses": [contract_address],
-            "exclude_spam": "true",
-            "media_items": "false"  # Faster response
-        }
-        
+    async def _get_tokens_of_owner(self, contract_address: str, owner_address: str) -> List[int]:
+        """Get all token IDs owned by address using tokensOfOwner (like your original backend)"""
         try:
-            result = await self._make_moralis_request(endpoint, params)
-            if result:
-                return result.get("result", [])
+            result = await self._call_contract_function(
+                contract_address,
+                'tokensOfOwner',
+                [owner_address]
+            )
+            
+            if result and isinstance(result, list):
+                return [int(token_id) for token_id in result]
+            elif result and isinstance(result, dict):
+                # Sometimes Moralis wraps the result
+                actual_result = result.get('result', result)
+                if isinstance(actual_result, list):
+                    return [int(token_id) for token_id in actual_result]
+            
             return []
             
         except Exception as e:
-            logger.error(f"Error getting NFTs for contract {contract_address}: {e}")
+            logger.error(f"Error getting tokens of owner: {e}")
             return []
     
-    def _parse_nft_metadata(self, nft: dict) -> dict:
-        """Parse NFT metadata safely"""
-        metadata = {}
-        if nft.get("metadata"):
-            try:
-                if isinstance(nft.get("metadata"), str):
-                    metadata = json.loads(nft.get("metadata"))
-                else:
-                    metadata = nft.get("metadata", {})
-            except json.JSONDecodeError:
-                logger.warning(f"Failed to parse metadata for token {nft.get('token_id')}")
-                metadata = {}
-        
-        return metadata
-    
-    def _parse_nft_attributes(self, attributes: List[Dict]) -> Dict:
-        """Parse NFT attributes from metadata"""
-        parsed = {}
-        if not attributes:
-            return parsed
+    async def _get_hero_attributes(self, token_id: int) -> Dict:
+        """Get hero attributes using getAttribs (exactly like your card_distribution.py)"""
+        try:
+            # Call getAttribs function - returns (sec, ano, inn)
+            attribs_result = await self._call_contract_function(
+                self.contracts['heroes'],
+                'getAttribs',
+                [str(token_id)]
+            )
             
-        for attr in attributes:
-            if isinstance(attr, dict):
-                trait_type = attr.get('trait_type', '')
-                value = attr.get('value', 0)
-                parsed[trait_type] = value
-        return parsed
+            if attribs_result and len(attribs_result) >= 3:
+                sec = int(attribs_result[0]) if attribs_result[0] else 50
+                ano = int(attribs_result[1]) if attribs_result[1] else 50
+                inn = int(attribs_result[2]) if attribs_result[2] else 50
+                
+                return {"sec": sec, "ano": ano, "inn": inn}
+            
+            logger.warning(f"Invalid getAttribs result for hero {token_id}: {attribs_result}")
+            return {"sec": 50, "ano": 50, "inn": 50}  # Fallback
+            
+        except Exception as e:
+            logger.error(f"Error getting hero attributes for {token_id}: {e}")
+            return {"sec": 50, "ano": 50, "inn": 50}  # Fallback
+    
+    async def _get_hero_info(self, token_id: int) -> Dict:
+        """Get hero token info using getTokenInfo (like your card_distribution.py)"""
+        try:
+            # Call getTokenInfo function
+            token_info = await self._call_contract_function(
+                self.contracts['heroes'],
+                'getTokenInfo', 
+                [str(token_id)]
+            )
+            
+            if token_info and len(token_info) >= 2:
+                season_card_id = int(token_info[0]) if token_info[0] else 0
+                serial_number = int(token_info[1]) if token_info[1] else 0
+                
+                # Decode card data like your original decode_card_data function
+                card_type = season_card_id // 1000
+                season_id = (season_card_id % 1000) // 10
+                card_season_collection_id = season_card_id % 10
+                
+                return {
+                    "season_card_id": season_card_id,
+                    "serial_number": serial_number,
+                    "card_type": card_type,
+                    "season_id": season_id, 
+                    "card_season_collection_id": card_season_collection_id
+                }
+            
+            return {"season_card_id": 0, "serial_number": 0, "card_type": 0, "season_id": 0, "card_season_collection_id": 0}
+            
+        except Exception as e:
+            logger.error(f"Error getting hero info for {token_id}: {e}")
+            return {"season_card_id": 0, "serial_number": 0, "card_type": 0, "season_id": 0, "card_season_collection_id": 0}
+    
+    async def _get_weapon_attributes(self, token_id: int) -> Dict:
+        """Get weapon attributes using getAttribs (exactly like your weapon.py)"""
+        try:
+            # Call getAttribs function - returns (security, anonymity, innovation)
+            attribs_result = await self._call_contract_function(
+                self.contracts['weapons'],
+                'getAttribs',
+                [str(token_id)]
+            )
+            
+            if attribs_result and len(attribs_result) >= 3:
+                security = int(attribs_result[0]) if attribs_result[0] else 60
+                anonymity = int(attribs_result[1]) if attribs_result[1] else 60
+                innovation = int(attribs_result[2]) if attribs_result[2] else 60
+                
+                return {"security": security, "anonymity": anonymity, "innovation": innovation}
+            
+            logger.warning(f"Invalid getAttribs result for weapon {token_id}: {attribs_result}")
+            return {"security": 60, "anonymity": 60, "innovation": 60}  # Fallback
+            
+        except Exception as e:
+            logger.error(f"Error getting weapon attributes for {token_id}: {e}")
+            return {"security": 60, "anonymity": 60, "innovation": 60}  # Fallback
+    
+    async def _get_weapon_info(self, token_id: int) -> Dict:
+        """Get weapon info using getTokenInfo (exactly like your weapon.py)"""
+        try:
+            # Call getTokenInfo function - returns (weapon_tier, weapon_type, weapon_subtype, category, serial_number)
+            token_info = await self._call_contract_function(
+                self.contracts['weapons'],
+                'getTokenInfo',
+                [str(token_id)]
+            )
+            
+            if token_info and len(token_info) >= 5:
+                weapon_tier = int(token_info[0]) if token_info[0] else 1
+                weapon_type = int(token_info[1]) if token_info[1] else 1
+                weapon_subtype = int(token_info[2]) if token_info[2] else 1
+                category = int(token_info[3]) if token_info[3] else 1
+                serial_number = int(token_info[4]) if token_info[4] else 1
+                
+                # Get weapon name using your original mapping
+                weapon_name = self._get_weapon_name(weapon_tier, weapon_type, weapon_subtype, category)
+                
+                return {
+                    "weapon_tier": weapon_tier,
+                    "weapon_type": weapon_type,
+                    "weapon_subtype": weapon_subtype,
+                    "category": category,
+                    "serial_number": serial_number,
+                    "weapon_name": weapon_name
+                }
+            
+            return {"weapon_tier": 1, "weapon_type": 1, "weapon_subtype": 1, "category": 1, "serial_number": 1, "weapon_name": "Unknown Weapon"}
+            
+        except Exception as e:
+            logger.error(f"Error getting weapon info for {token_id}: {e}")
+            return {"weapon_tier": 1, "weapon_type": 1, "weapon_subtype": 1, "category": 1, "serial_number": 1, "weapon_name": "Unknown Weapon"}
     
     def _get_weapon_name(self, weapon_tier: int, weapon_type: int, weapon_subtype: int, category: int) -> str:
         """Get weapon name using your original mapping logic"""
@@ -154,28 +261,30 @@ class EnhancedMoralisService:
     
     async def get_heroes_for_unity(self, address: str) -> Dict:
         """
-        Get Heroes NFTs with Unity-compatible format using Moralis NFT API
+        Get Heroes NFTs with Unity-compatible format using SMART CONTRACT CALLS
         Returns exact format Unity expects: paginated with "sec"/"ano"/"inn"
         """
         try:
-            logger.info(f"🦸 Fetching Heroes for {address} using Moralis NFT API")
+            logger.info(f"🦸 Fetching Heroes for {address} using SMART CONTRACT CALLS")
             
-            # Get NFTs using Moralis NFT endpoint
-            nfts = await self._get_nfts_by_contract(address, self.contracts['heroes'])
+            # Get all token IDs owned by this address (like your original tokensOfOwner call)
+            token_ids = await self._get_tokens_of_owner(self.contracts['heroes'], address)
             
-            if not nfts:
+            if not token_ids:
                 logger.info(f"No heroes found for {address}")
                 return {"results": [], "count": 0, "next": None}
             
             heroes = []
             
-            for nft in nfts:
+            for token_id in token_ids:
                 try:
-                    token_id = int(nft.get("token_id", 0))
-                    metadata = self._parse_nft_metadata(nft)
-                    attributes = self._parse_nft_attributes(metadata.get('attributes', []))
+                    # Get attributes using your original getAttribs call
+                    attributes = await self._get_hero_attributes(token_id)
                     
-                    # Determine fraction based on token ID ranges (from your original logic)
+                    # Get token info using your original getTokenInfo call
+                    hero_info = await self._get_hero_info(token_id)
+                    
+                    # Determine fraction based on your original logic
                     if token_id >= 1 and token_id <= 3000:
                         fraction = "Goliath"
                     elif token_id >= 3001 and token_id <= 6000:
@@ -183,38 +292,39 @@ class EnhancedMoralisService:
                     else:
                         fraction = "Neutral"
                     
-                    # Get attributes or use defaults
-                    sec = attributes.get('Security', 50)
-                    ano = attributes.get('Anonymity', 50)
-                    inn = attributes.get('Innovation', 50)
-                    
-                    # Determine card class (default to SPECIALIST for now)
+                    # Determine card class based on card_type (from your original system)
                     card_class = "SPECIALIST"
+                    if hero_info["card_type"] == 1:
+                        card_class = "COLLECTIBLE"
+                    elif hero_info["card_type"] == 2:
+                        card_class = "REVOLUTION"
+                    elif hero_info["card_type"] == 3:
+                        card_class = "INFLUENCER"
                     
-                    # Create Unity-compatible hero object
+                    # Create Unity-compatible hero object (exact format from your docs)
                     hero = {
                         "id": token_id,
                         "bc_id": token_id,
-                        "title": metadata.get('name', f"Hero #{token_id}"),
+                        "title": f"Hero #{token_id}",
                         "fraction": fraction,
                         "owner": address.lower(),
                         "card_class": card_class,
                         "reward": {
-                            "power": attributes.get('Power', 0)
+                            "power": hero_info["serial_number"]  # Use serial number as power
                         },
                         "metadata": {
-                            "sec": sec,      # Unity expects "sec"
-                            "ano": ano,      # Unity expects "ano"
-                            "inn": inn,      # Unity expects "inn"
-                            "revolution": False  # Default for now
+                            "sec": attributes["sec"],      # Unity expects "sec"
+                            "ano": attributes["ano"],      # Unity expects "ano"
+                            "inn": attributes["inn"],      # Unity expects "inn"
+                            "revolution": hero_info["card_type"] == 2
                         }
                     }
                     
                     heroes.append(hero)
-                    logger.debug(f"✅ Hero {token_id}: sec={sec}, ano={ano}, inn={inn}")
+                    logger.debug(f"✅ Hero {token_id}: sec={attributes['sec']}, ano={attributes['ano']}, inn={attributes['inn']}")
                     
                 except Exception as e:
-                    logger.error(f"Error processing hero {nft.get('token_id', 'unknown')}: {e}")
+                    logger.error(f"Error processing hero {token_id}: {e}")
                     continue
             
             result = {
@@ -223,7 +333,7 @@ class EnhancedMoralisService:
                 "next": None
             }
             
-            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes using Moralis NFT API")
+            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with LIVE SMART CONTRACT DATA")
             return result
             
         except Exception as e:
@@ -232,57 +342,51 @@ class EnhancedMoralisService:
     
     async def get_weapons_for_unity(self, address: str) -> List[Dict]:
         """
-        Get Weapons NFTs with Unity-compatible format using Moralis NFT API
+        Get Weapons NFTs with Unity-compatible format using SMART CONTRACT CALLS
         Returns exact format Unity expects: direct array with "security"/"anonymity"/"innovation"
         """
         try:
-            logger.info(f"⚔️ Fetching Weapons for {address} using Moralis NFT API")
+            logger.info(f"⚔️ Fetching Weapons for {address} using SMART CONTRACT CALLS")
             
-            # Get NFTs using Moralis NFT endpoint
-            nfts = await self._get_nfts_by_contract(address, self.contracts['weapons'])
+            # Get all token IDs owned by this address (like your original tokensOfOwner call)
+            token_ids = await self._get_tokens_of_owner(self.contracts['weapons'], address)
             
-            if not nfts:
+            if not token_ids:
                 logger.info(f"No weapons found for {address}")
                 return []
             
             weapons = []
             
-            for nft in nfts:
+            for token_id in token_ids:
                 try:
-                    token_id = int(nft.get("token_id", 0))
-                    metadata = self._parse_nft_metadata(nft)
-                    attributes = self._parse_nft_attributes(metadata.get('attributes', []))
+                    # Get attributes using your original getAttribs call
+                    attributes = await self._get_weapon_attributes(token_id)
                     
-                    # Get attributes or use defaults
-                    security = attributes.get('Security', 60)
-                    anonymity = attributes.get('Anonymity', 60)
-                    innovation = attributes.get('Innovation', 60)
+                    # Get weapon info using your original getTokenInfo call  
+                    weapon_info = await self._get_weapon_info(token_id)
                     
-                    # Get weapon name (from metadata or generate default)
-                    weapon_name = metadata.get('name', f"Weapon #{token_id}")
-                    
-                    # Create Unity-compatible weapon object
+                    # Create Unity-compatible weapon object (exact format from your docs)
                     weapon = {
                         "id": token_id,
                         "bc_id": token_id,
                         "owner_address": address.lower(),
                         "contract_address": self.contracts['weapons'].lower(),
-                        "weapon_name": weapon_name,
-                        "security": security,      # Unity expects "security" (full word)
-                        "anonymity": anonymity,    # Unity expects "anonymity" (full word)
-                        "innovation": innovation,  # Unity expects "innovation" (full word)
+                        "weapon_name": weapon_info["weapon_name"],
+                        "security": attributes["security"],      # Unity expects "security" (full word)
+                        "anonymity": attributes["anonymity"],    # Unity expects "anonymity" (full word)
+                        "innovation": attributes["innovation"],  # Unity expects "innovation" (full word)
                         "minted": True,
                         "burned": False
                     }
                     
                     weapons.append(weapon)
-                    logger.debug(f"✅ Weapon {token_id} ({weapon_name}): security={security}, anonymity={anonymity}, innovation={innovation}")
+                    logger.debug(f"✅ Weapon {token_id} ({weapon_info['weapon_name']}): security={attributes['security']}, anonymity={attributes['anonymity']}, innovation={attributes['innovation']}")
                     
                 except Exception as e:
-                    logger.error(f"Error processing weapon {nft.get('token_id', 'unknown')}: {e}")
+                    logger.error(f"Error processing weapon {token_id}: {e}")
                     continue
             
-            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons using Moralis NFT API")
+            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons with LIVE SMART CONTRACT DATA")
             return weapons
             
         except Exception as e:
