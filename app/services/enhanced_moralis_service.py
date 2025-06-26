@@ -1,4 +1,4 @@
-# services/enhanced_moralis_service.py - QUICK FIX with inline ABIs
+# services/enhanced_moralis_service.py - COMPLETE with database integration
 import logging
 from typing import Dict, List, Optional, Any
 import asyncio
@@ -78,6 +78,7 @@ class EnhancedMoralisService:
     """
     Enhanced service that replicates your original Django backend logic
     Now uses Web3.py for direct smart contract calls instead of Moralis
+    Includes database integration for character data
     """
     
     def __init__(self):
@@ -123,7 +124,7 @@ class EnhancedMoralisService:
             }
         }
         
-        logger.info("✅ Enhanced Moralis service initialized with Web3.py backend")
+        logger.info("✅ Enhanced Moralis service initialized with Web3.py backend and database integration")
     
     def _get_weapon_name(self, weapon_tier: int, weapon_type: int, weapon_subtype: int, category: int) -> str:
         """Get weapon name using your original mapping logic"""
@@ -138,9 +139,13 @@ class EnhancedMoralisService:
         """
         Get Heroes NFTs with Unity-compatible format using Web3.py
         Returns exact format Unity expects: paginated with "sec"/"ano"/"inn"
+        Enhanced with database character lookup
         """
         try:
-            logger.info(f"🦸 Fetching Heroes for {address} using Web3.py")
+            logger.info(f"🦸 Fetching Heroes for {address} using Web3.py with database integration")
+            
+            # Import database function at method level to avoid circular imports
+            from ..database import execute_query
             
             # Get all token IDs owned by this address
             token_ids = await web3_service.get_tokens_of_owner('heroes', HEROES_ABI, address)
@@ -159,44 +164,72 @@ class EnhancedMoralisService:
                     
                     attributes, hero_info = await asyncio.gather(attributes_task, info_task)
                     
-                    # Determine fraction based on your original logic
-                    if token_id >= 1 and token_id <= 3000:
-                        fraction = "Goliath"
-                    elif token_id >= 3001 and token_id <= 6000:
-                        fraction = "Renegade"
-                    else:
-                        fraction = "Neutral"
+                    # Extract season_card_id from smart contract data
+                    season_card_id = hero_info.get("season_card_id", 0)
                     
-                    # Determine card class based on card_type (from your original system)
+                    # Default values in case database lookup fails
+                    title = f"Hero #{token_id}"
+                    fraction = "Neutral"
                     card_class = "SPECIALIST"
-                    if hero_info["card_type"] == 1:
-                        card_class = "COLLECTIBLE"
-                    elif hero_info["card_type"] == 2:
-                        card_class = "REVOLUTION"
-                    elif hero_info["card_type"] == 3:
-                        card_class = "INFLUENCER"
                     
-                    # Create Unity-compatible hero object (exact format from your docs)
+                    # Lookup character data from database using season_card_id
+                    if season_card_id:
+                        try:
+                            character_data = await execute_query(
+                                "SELECT title, fraction, class FROM characters WHERE type_szn_id = $1",
+                                season_card_id
+                            )
+                            
+                            if character_data:
+                                # Found character in database - use actual data
+                                character = character_data[0]
+                                title = character["title"]
+                                fraction = character["fraction"]
+                                
+                                # Map database class to Unity card_class format
+                                db_class = character["class"]
+                                if db_class == "Harvester":
+                                    card_class = "HARVESTER"
+                                elif db_class == "Warmonger":
+                                    card_class = "WARMONGER"
+                                elif db_class == "Defender":
+                                    card_class = "DEFENDER"
+                                elif db_class == "Specialist":
+                                    card_class = "SPECIALIST"
+                                elif db_class == "Revolutionist":
+                                    card_class = "REVOLUTIONIST"
+                                else:
+                                    card_class = "SPECIALIST"  # fallback
+                                
+                                logger.debug(f"✅ Found character data for token {token_id} (season_card_id: {season_card_id}): {title} - {fraction} - {card_class}")
+                            else:
+                                logger.warning(f"⚠️ No character found for season_card_id: {season_card_id} (token {token_id})")
+                        except Exception as db_error:
+                            logger.error(f"❌ Database lookup failed for season_card_id {season_card_id}: {db_error}")
+                            # Continue with default values
+                    
+                    # Create Unity-compatible hero object with actual character data
                     hero = {
                         "id": token_id,
                         "bc_id": token_id,
-                        "title": f"Hero #{token_id}",
+                        "title": title,
                         "fraction": fraction,
                         "owner": address.lower(),
                         "card_class": card_class,
                         "reward": {
-                            "power": hero_info["serial_number"]  # Use serial number as power
+                            "power": hero_info.get("serial_number", 1)
                         },
                         "metadata": {
-                            "sec": attributes["sec"],      # Unity expects "sec"
-                            "ano": attributes["ano"],      # Unity expects "ano"
-                            "inn": attributes["inn"],      # Unity expects "inn"
-                            "revolution": hero_info["card_type"] == 2
+                            "sec": attributes["sec"],
+                            "ano": attributes["ano"],
+                            "inn": attributes["inn"],
+                            "revolution": hero_info.get("card_type") == 2,
+                            "season_card_id": season_card_id  # Include for debugging
                         }
                     }
                     
                     heroes.append(hero)
-                    logger.debug(f"✅ Hero {token_id}: sec={attributes['sec']}, ano={attributes['ano']}, inn={attributes['inn']}")
+                    logger.debug(f"✅ Hero {token_id}: {title} ({card_class}/{fraction}) - sec={attributes['sec']}, ano={attributes['ano']}, inn={attributes['inn']}")
                     
                 except Exception as e:
                     logger.error(f"Error processing hero {token_id}: {e}")
@@ -208,7 +241,7 @@ class EnhancedMoralisService:
                 "next": None
             }
             
-            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with live blockchain attributes")
+            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with character data from database")
             return result
             
         except ValueError as e:

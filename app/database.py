@@ -1,4 +1,4 @@
-# app/database.py - FIXED for asyncpg parameter syntax
+# app/database.py - COMPLETE with characters table integration
 from supabase import create_client, Client
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
@@ -67,7 +67,7 @@ async def get_db() -> AsyncGenerator:
 
 # Database initialization
 async def init_db():
-    """Initialize database with required tables"""
+    """Initialize database with required tables including characters table"""
     try:
         pool = await get_db_pool()
         
@@ -171,6 +171,60 @@ async def init_db():
                     UNIQUE(user_id, wallet_address)
                 );
             ''')
+
+            # ============================================
+            # CHARACTERS TABLE - Game character data
+            # ============================================
+            
+            # Create characters table for game character data
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS characters (
+                    type_szn_id INTEGER PRIMARY KEY,
+                    title VARCHAR(50) NOT NULL,
+                    class VARCHAR(20) NOT NULL,
+                    fraction VARCHAR(20) NOT NULL
+                );
+            ''')
+
+            # Insert character data if table is empty
+            character_count = await connection.fetchval("SELECT COUNT(*) FROM characters")
+            if character_count == 0:
+                logger.info("🎭 Inserting character data...")
+                await connection.execute('''
+                    INSERT INTO characters (type_szn_id, title, class, fraction) VALUES
+                    (1011, 'Zombie Chad', 'Harvester', 'Renegade'),
+                    (1012, 'Farmer', 'Harvester', 'Goliath'),
+                    (1013, 'Crypto Queen', 'Warmonger', 'Renegade'),
+                    (1014, 'Link', 'Defender', 'Goliath'),
+                    (1021, 'Charles', 'Defender', 'Goliath'),
+                    (1022, 'Elon', 'Specialist', 'Renegade'),
+                    (1023, 'Bridger', 'Defender', 'Goliath'),
+                    (1024, 'John', 'Specialist', 'Renegade'),
+                    (1031, 'Vitalik', 'Warmonger', 'Goliath'),
+                    (1032, 'Warper', 'Defender', 'Renegade'),
+                    (1033, 'Michael', 'Specialist', 'Goliath'),
+                    (1034, 'Solana', 'Warmonger', 'Renegade'),
+                    (1041, 'Harvester', 'Harvester', 'Goliath'),
+                    (1042, 'MasterCZ', 'Warmonger', 'Renegade'),
+                    (1043, 'Sam', 'Specialist', 'Goliath'),
+                    (1044, 'Lunatic', 'Warmonger', 'Renegade'),
+                    (1051, 'Shardeus', 'Defender', 'Goliath'),
+                    (2010, 'Commander', 'Revolutionist', 'Other'),
+                    (2020, 'Floki', 'Revolutionist', 'Other'),
+                    (2030, 'Nero', 'Revolutionist', 'Other'),
+                    (2040, 'Atom', 'Revolutionist', 'Other'),
+                    (3001, 'Ash', 'Specialist', 'Other'),
+                    (3002, 'Kroge', 'Specialist', 'Other'),
+                    (3003, 'Polytron', 'Specialist', 'Other'),
+                    (3004, 'Warpath', 'Specialist', 'Other'),
+                    (3005, 'MedaHero', 'Specialist', 'Other'),
+                    (3006, 'Gunstore', 'Specialist', 'Other'),
+                    (3007, 'Unstoppable Force', 'Specialist', 'Other')
+                    ON CONFLICT (type_szn_id) DO NOTHING;
+                ''')
+                logger.info("✅ Character data inserted successfully")
+            else:
+                logger.info(f"✅ Characters table already contains {character_count} records")
 
             # ============================================
             # MEDASHOOTER-SPECIFIC TABLES
@@ -335,6 +389,10 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_wallet_address ON wallet_analytics(wallet_address);
                 CREATE INDEX IF NOT EXISTS idx_wallet_analytics_updated_at ON wallet_analytics(updated_at);
                 
+                CREATE INDEX IF NOT EXISTS idx_characters_class ON characters(class);
+                CREATE INDEX IF NOT EXISTS idx_characters_fraction ON characters(fraction);
+                CREATE INDEX IF NOT EXISTS idx_characters_title ON characters(title);
+                
                 CREATE INDEX IF NOT EXISTS idx_medashooter_unity_scores_submission_time ON medashooter_unity_scores(submission_time);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_player_address ON medashooter_scores(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_final_score ON medashooter_scores(final_score);
@@ -418,7 +476,7 @@ async def init_db():
                     FOR EACH ROW EXECUTE FUNCTION update_player_stats_after_score();
             ''')
             
-        logger.info("✅ Database initialized successfully with MedaShooter tables!")
+        logger.info("✅ Database initialized successfully with all tables including characters!")
         
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {str(e)}")
@@ -481,6 +539,30 @@ async def check_db_health() -> dict:
             "error": str(e),
             "timestamp": asyncio.get_event_loop().time()
         }
+
+# Character data helper functions
+async def get_character_by_season_card_id(season_card_id: int) -> dict:
+    """Get character data by season_card_id (type_szn_id)"""
+    try:
+        result = await execute_query(
+            "SELECT type_szn_id, title, class, fraction FROM characters WHERE type_szn_id = $1",
+            season_card_id
+        )
+        return result[0] if result else None
+    except Exception as e:
+        logger.error(f"Failed to get character for season_card_id {season_card_id}: {e}")
+        return None
+
+async def get_all_characters() -> list:
+    """Get all characters"""
+    try:
+        result = await execute_query(
+            "SELECT type_szn_id, title, class, fraction FROM characters ORDER BY type_szn_id"
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Failed to get all characters: {e}")
+        return []
 
 # Cleanup function
 async def close_db_pool():
