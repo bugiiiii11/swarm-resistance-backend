@@ -130,10 +130,10 @@ class TokenBenefitsService:
             # Map to Unity-compatible format
             benefits = {
                 "standard": {
-                    "currently_staked": medallc_balance  # MEDALLC → Shield ability
+                    "currently_staked": 1 if medallc_balance > 0 else 0  # MEDALLC → Shield ability
                 },
                 "liquidity": {
-                    "currently_staked": moh_balance      # MOH → Basic perk selection
+                    "currently_staked": 1 if moh_balance > 0 else 0      # MOH → Basic perk selection
                 }
             }
             
