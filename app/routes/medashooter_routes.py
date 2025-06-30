@@ -1,10 +1,11 @@
-# routes/medashooter_routes.py - COMPLETE with score submission and timestamp
+# routes/medashooter_routes.py - COMPLETE with token benefits and score submission
 from fastapi import APIRouter, Query, HTTPException, status, Request
 from fastapi.responses import PlainTextResponse
 from typing import Optional, Dict, Any
 import logging
 import time
 import json
+import asyncio
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
@@ -13,7 +14,7 @@ router = APIRouter()
 # Import the real services with CORRECT paths
 try:
     from app.services.enhanced_moralis_service import enhanced_moralis_service
-    from app.services.web3_service import Web3ServiceException
+    from app.services.web3_service import web3_service, Web3ServiceException
     from app.services.decryption_service import get_decryption_service
     from app.database import execute_command, execute_query, execute_transaction
     SERVICES_AVAILABLE = True
@@ -21,6 +22,146 @@ try:
 except ImportError as e:
     SERVICES_AVAILABLE = False
     logger.error(f"❌ Failed to import Web3 services: {e}")
+
+# ERC20 ABI - minimal balanceOf function for token benefits
+ERC20_TOKEN_ABI = [
+    {
+        "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+        "name": "balanceOf",
+        "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+        "stateMutability": "view",
+        "type": "function"
+    }
+]
+
+# Token contract addresses for DeFi benefits
+TOKEN_CONTRACTS = {
+    "moh": "0x1D3dD50B23849247C426AEd040Fb8f93D9123b60",
+    "medallc": "0xEDfd96dD07b6eA11393c177686795771579f488a"
+}
+
+class TokenBenefitsService:
+    """Service for checking ERC20 token balances and mapping to game benefits"""
+    
+    def __init__(self):
+        self.contracts = {}
+        logger.info("✅ TokenBenefitsService initialized")
+    
+    def _get_token_contract(self, token_name: str):
+        """Get ERC20 contract instance with caching"""
+        cache_key = f"token_{token_name}"
+        
+        if cache_key in self.contracts:
+            return self.contracts[cache_key]
+        
+        # Get working Web3 instance
+        w3 = web3_service._get_working_web3()
+        contract_address = TOKEN_CONTRACTS.get(token_name)
+        
+        if not contract_address:
+            raise Web3ServiceException(f"Unknown token: {token_name}")
+        
+        try:
+            contract = w3.eth.contract(
+                address=w3.to_checksum_address(contract_address),
+                abi=ERC20_TOKEN_ABI
+            )
+            self.contracts[cache_key] = contract
+            logger.debug(f"✅ Token contract {token_name} loaded at {contract_address}")
+            return contract
+        except Exception as e:
+            raise Web3ServiceException(f"Failed to load token contract {token_name}: {e}")
+    
+    async def get_token_balance(self, token_name: str, address: str) -> int:
+        """Get ERC20 token balance for an address"""
+        # Validate and normalize address
+        try:
+            normalized_address = web3_service._validate_address(address)
+        except ValueError as e:
+            raise ValueError(f"Invalid address: {e}")
+        
+        # Check cache first
+        cache_key = f"token_balance_{token_name}_{normalized_address.lower()}"
+        if cache_key in web3_service.cache:
+            logger.debug(f"🎯 Cache hit for {cache_key}")
+            return web3_service.cache[cache_key]
+        
+        try:
+            contract = self._get_token_contract(token_name)
+            
+            # Call balanceOf function with retry logic
+            contract_function = contract.functions.balanceOf(normalized_address)
+            result = await web3_service._call_contract_function_with_retry(contract_function)
+            
+            balance = int(result) if result else 0
+            
+            # Cache the result
+            web3_service.cache[cache_key] = balance
+            
+            logger.debug(f"✅ {token_name.upper()} balance for {normalized_address}: {balance}")
+            return balance
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get {token_name} balance for {address}: {e}")
+            raise Web3ServiceException(f"Failed to get {token_name} balance: {e}")
+    
+    async def get_all_token_benefits(self, address: str) -> dict:
+        """Get all token balances and map to Unity benefits format"""
+        try:
+            logger.info(f"🪙 Fetching token benefits for {address}")
+            
+            # Get both token balances in parallel
+            moh_task = self.get_token_balance("moh", address)
+            medallc_task = self.get_token_balance("medallc", address)
+            
+            moh_balance, medallc_balance = await asyncio.gather(
+                moh_task, medallc_task, return_exceptions=True
+            )
+            
+            # Handle any exceptions
+            if isinstance(moh_balance, Exception):
+                logger.error(f"MOH balance fetch failed: {moh_balance}")
+                moh_balance = 0
+            
+            if isinstance(medallc_balance, Exception):
+                logger.error(f"MEDALLC balance fetch failed: {medallc_balance}")
+                medallc_balance = 0
+            
+            # Map to Unity-compatible format
+            benefits = {
+                "standard": {
+                    "currently_staked": medallc_balance  # MEDALLC → Shield ability
+                },
+                "liquidity": {
+                    "currently_staked": moh_balance      # MOH → Basic perk selection
+                }
+            }
+            
+            # Log benefits for debugging
+            logger.info(f"✅ Token benefits for {address}:")
+            logger.info(f"   MEDALLC: {medallc_balance} → Shield: {'YES' if medallc_balance > 0 else 'NO'}")
+            logger.info(f"   MOH: {moh_balance} → Perks: {'YES' if moh_balance > 0 else 'NO'}")
+            
+            return benefits
+            
+        except ValueError as e:
+            # Address validation error - client error
+            logger.error(f"❌ Address validation error: {e}")
+            raise ValueError(str(e))
+        except Web3ServiceException as e:
+            # Web3 service error - server error
+            logger.error(f"❌ Web3 service error: {e}")
+            raise Web3ServiceException(str(e))
+        except Exception as e:
+            logger.error(f"❌ Unexpected error getting token benefits: {e}")
+            raise Web3ServiceException(f"Unexpected error: {e}")
+
+# Create global service instance
+token_benefits_service = TokenBenefitsService()
+
+# =============================================================================
+# EXISTING ENDPOINTS - Heroes and Weapons
+# =============================================================================
 
 @router.get("/api/v1/users/get_items/")
 async def get_user_nfts_unity(address: str = Query(..., description="Wallet address")):
@@ -107,6 +248,125 @@ async def get_user_weapons_unity(address: str = Query(..., description="Wallet a
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error occurred"
         )
+
+# =============================================================================
+# NEW TOKEN BENEFITS ENDPOINTS
+# =============================================================================
+
+@router.get("/api/v1/staking/")
+async def get_user_token_benefits(address: str = Query(..., description="Wallet address")):
+    """
+    Get user's token-based DeFi benefits
+    
+    Maps ERC20 token holdings to game benefits:
+    - MEDALLC tokens → Shield ability (staking simulation)
+    - MOH tokens → Basic perk selection (farming simulation)
+    """
+    if not SERVICES_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Web3 services not available"
+        )
+    
+    try:
+        logger.info(f"🪙 Token benefits endpoint called for address: {address}")
+        
+        # Get token benefits using real blockchain data
+        benefits_response = await token_benefits_service.get_all_token_benefits(address)
+        
+        logger.info(f"✅ Token benefits endpoint successful for {address}")
+        return benefits_response
+        
+    except ValueError as e:
+        # Address validation error - client error (400)
+        logger.warning(f"⚠️ Invalid address provided: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid wallet address: {str(e)}"
+        )
+    except Web3ServiceException as e:
+        # Web3 service error - server error (503)
+        logger.error(f"❌ Web3 service unavailable: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Blockchain service temporarily unavailable: {str(e)}"
+        )
+    except Exception as e:
+        # Unexpected error - server error (500)
+        logger.error(f"❌ Unexpected error in token benefits endpoint: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error occurred"
+        )
+
+@router.get("/api/v1/users/staking/")
+async def get_user_token_benefits_alt(address: str = Query(..., description="Wallet address")):
+    """Alternative endpoint path for token benefits"""
+    return await get_user_token_benefits(address)
+
+@router.get("/api/v1/tokens/balances/")
+async def get_detailed_token_balances(address: str = Query(..., description="Wallet address")):
+    """
+    Get detailed token balance information for debugging
+    """
+    if not SERVICES_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Web3 services not available"
+        )
+    
+    try:
+        logger.info(f"🔍 Detailed token balances requested for address: {address}")
+        
+        # Get individual token balances
+        moh_balance = await token_benefits_service.get_token_balance("moh", address)
+        medallc_balance = await token_benefits_service.get_token_balance("medallc", address)
+        
+        return {
+            "address": address.lower(),
+            "tokens": {
+                "moh": {
+                    "balance": moh_balance,
+                    "contract": TOKEN_CONTRACTS["moh"],
+                    "benefit": "basic_perk_selection",
+                    "enabled": moh_balance > 0
+                },
+                "medallc": {
+                    "balance": medallc_balance, 
+                    "contract": TOKEN_CONTRACTS["medallc"],
+                    "benefit": "shield_ability",
+                    "enabled": medallc_balance > 0
+                }
+            },
+            "benefits_summary": {
+                "shield_ability": medallc_balance > 0,
+                "basic_perk_selection": moh_balance > 0,
+                "total_benefits": sum([medallc_balance > 0, moh_balance > 0])
+            }
+        }
+        
+    except ValueError as e:
+        logger.warning(f"⚠️ Invalid address provided: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid wallet address: {str(e)}"
+        )
+    except Web3ServiceException as e:
+        logger.error(f"❌ Web3 service unavailable: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Blockchain service temporarily unavailable: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"❌ Unexpected error in detailed token balances: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error occurred"
+        )
+
+# =============================================================================
+# EXISTING GAME ENDPOINTS - Timestamp and Score Submission
+# =============================================================================
 
 @router.get("/api/v1/minigames/medashooter/timestamp/", response_class=PlainTextResponse)
 async def get_medashooter_timestamp():
@@ -475,29 +735,45 @@ async def report_cheating(request: Request):
             detail="Failed to process cheat report"
         )
 
-# Helper functions
-def calculate_unity_score(raw_score: int) -> int:
-    """
-    Apply Unity's score decryption algorithm (from old Django code)
-    This reverses the encryption Unity applies to scores
-    """
-    import numpy as np
-    
-    score = np.uint32(raw_score)
-    score = np.uint32(((score >> 16) ^ score) * 0x119DE1F3)
-    score = np.uint32(((score >> 16) ^ score) * 0x119DE1F3)
-    return int(np.uint32(((score >> 16) ^ score)))
+# =============================================================================
+# HEALTH CHECK AND MONITORING ENDPOINTS
+# =============================================================================
 
-async def get_nft_boosts_for_player(player_address: str) -> Dict[str, Any]:
-    """
-    Get current NFT boosts for a player using the enhanced service
-    """
+@router.get("/api/v1/staking/health")
+async def token_benefits_health_check():
+    """Health check for token benefits service"""
     try:
-        player_data = await enhanced_moralis_service.get_enhanced_player_data(player_address)
-        return player_data.get("boosts", {})
+        # Test Web3 connectivity
+        service_status = "healthy" if SERVICES_AVAILABLE else "unavailable"
+        
+        if SERVICES_AVAILABLE:
+            try:
+                w3 = web3_service._get_working_web3()
+                current_block = w3.eth.block_number
+                web3_status = "connected"
+            except Exception as e:
+                current_block = None
+                web3_status = f"error: {str(e)}"
+        else:
+            current_block = None
+            web3_status = "services_not_available"
+        
+        return {
+            "status": service_status,
+            "service": "token_benefits",
+            "web3_status": web3_status,
+            "current_block": current_block,
+            "contracts": TOKEN_CONTRACTS,
+            "cache_stats": web3_service.get_cache_stats() if SERVICES_AVAILABLE else None,
+            "supported_tokens": ["moh", "medallc"]
+        }
+        
     except Exception as e:
-        logger.warning(f"⚠️ Failed to get NFT boosts for {player_address}: {e}")
-        return {}
+        logger.error(f"❌ Health check failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Health check failed: {str(e)}"
+        )
 
 # Enhanced endpoints (already existing)
 @router.get("/api/game/medashooter/enhanced-player-data")
@@ -628,8 +904,6 @@ async def get_web3_service_status():
         }
     
     try:
-        from app.services.web3_service import web3_service
-        
         cache_stats = web3_service.get_cache_stats()
         
         # Test connectivity
@@ -652,6 +926,7 @@ async def get_web3_service_status():
             "current_block": current_block,
             "cache_stats": cache_stats,
             "rsa_decryption": rsa_status,
+            "token_contracts": TOKEN_CONTRACTS,
             "timestamp": int(time.time())
         }
         
@@ -675,8 +950,6 @@ async def clear_web3_cache():
         )
     
     try:
-        from app.services.web3_service import web3_service
-        
         web3_service.clear_cache()
         
         return {
@@ -690,3 +963,30 @@ async def clear_web3_cache():
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Unable to clear cache"
         )
+
+# =============================================================================
+# HELPER FUNCTIONS
+# =============================================================================
+
+def calculate_unity_score(raw_score: int) -> int:
+    """
+    Apply Unity's score decryption algorithm (from old Django code)
+    This reverses the encryption Unity applies to scores
+    """
+    import numpy as np
+    
+    score = np.uint32(raw_score)
+    score = np.uint32(((score >> 16) ^ score) * 0x119DE1F3)
+    score = np.uint32(((score >> 16) ^ score) * 0x119DE1F3)
+    return int(np.uint32(((score >> 16) ^ score)))
+
+async def get_nft_boosts_for_player(player_address: str) -> Dict[str, Any]:
+    """
+    Get current NFT boosts for a player using the enhanced service
+    """
+    try:
+        player_data = await enhanced_moralis_service.get_enhanced_player_data(player_address)
+        return player_data.get("boosts", {})
+    except Exception as e:
+        logger.warning(f"⚠️ Failed to get NFT boosts for {player_address}: {e}")
+        return {}

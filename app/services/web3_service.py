@@ -1,4 +1,4 @@
-# services/web3_service.py
+# services/web3_service.py - Enhanced with token contracts support
 import asyncio
 import logging
 import time
@@ -19,6 +19,7 @@ class Web3Service:
     """
     Robust Web3 service for Polygon smart contract interactions
     Supports multiple RPC endpoints with automatic failover
+    Enhanced with ERC20 token support for DeFi benefits
     """
     
     def __init__(self):
@@ -29,14 +30,20 @@ class Web3Service:
             "https://matic-mainnet.chainstacklabs.com"
         ]
         
-        # Contract addresses
+        # NFT Contract addresses
         self.contract_addresses = {
             'heroes': '0x27331bbfe94d1b8518816462225b16622ac74e2e',
             'weapons': '0x31dd72d810b34c339f2ce9119e2ebfbb9926694a',
             'lands': '0xaae02c81133d865d543df02b1e458de2279c4a5b'
         }
         
-        # Simple cache for NFT data (5 minutes TTL)
+        # ERC20 Token addresses for DeFi benefits
+        self.token_addresses = {
+            'moh': '0x1D3dD50B23849247C426AEd040Fb8f93D9123b60',
+            'medallc': '0xEDfd96dD07b6eA11393c177686795771579f488a'
+        }
+        
+        # Simple cache for NFT and token data (5 minutes TTL)
         self.cache = TTLCache(maxsize=1000, ttl=300)
         
         # Web3 instances for each RPC
@@ -46,7 +53,7 @@ class Web3Service:
         # Contract instances will be loaded when needed
         self.contracts = {}
         
-        logger.info("✅ Web3Service initialized with failover RPC endpoints")
+        logger.info("✅ Web3Service initialized with failover RPC endpoints and token support")
     
     def _initialize_web3_instances(self):
         """Initialize Web3 instances for all RPC endpoints"""
@@ -86,7 +93,10 @@ class Web3Service:
             return self.contracts[cache_key]
         
         w3 = self._get_working_web3()
-        contract_address = self.contract_addresses.get(contract_name)
+        
+        # Check both NFT contracts and token contracts
+        contract_address = (self.contract_addresses.get(contract_name) or 
+                          self.token_addresses.get(contract_name))
         
         if not contract_address:
             raise Web3ServiceException(f"Unknown contract: {contract_name}")
@@ -143,6 +153,10 @@ class Web3Service:
                         pass
         
         raise Web3ServiceException(f"Contract call failed after {max_retries + 1} attempts: {last_exception}")
+    
+    # =============================================================================
+    # NFT CONTRACT METHODS (existing)
+    # =============================================================================
     
     async def get_tokens_of_owner(self, contract_name: str, abi: List[Dict], owner_address: str) -> List[int]:
         """Get all token IDs owned by an address"""
@@ -286,6 +300,87 @@ class Web3Service:
             logger.error(f"❌ Failed to get info for token {token_id}: {e}")
             raise Web3ServiceException(f"Failed to get token info: {e}")
     
+    # =============================================================================
+    # ERC20 TOKEN METHODS (new)
+    # =============================================================================
+    
+    async def get_erc20_balance(self, token_name: str, owner_address: str) -> int:
+        """Get ERC20 token balance for an address"""
+        # Validate address first
+        owner_address = self._validate_address(owner_address)
+        
+        # Check cache first
+        cache_key = f"erc20_balance_{token_name}_{owner_address.lower()}"
+        if cache_key in self.cache:
+            logger.debug(f"🎯 Cache hit for {cache_key}")
+            return self.cache[cache_key]
+        
+        # ERC20 ABI for balanceOf
+        erc20_abi = [
+            {
+                "inputs": [{"internalType": "address", "name": "account", "type": "address"}],
+                "name": "balanceOf",
+                "outputs": [{"internalType": "uint256", "name": "", "type": "uint256"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ]
+        
+        try:
+            contract = self._get_contract(token_name, erc20_abi)
+            
+            # Call balanceOf function
+            contract_function = contract.functions.balanceOf(owner_address)
+            result = await self._call_contract_function_with_retry(contract_function)
+            
+            # Convert to integer
+            balance = int(result) if result else 0
+            
+            # Cache the result
+            self.cache[cache_key] = balance
+            
+            logger.info(f"✅ {token_name.upper()} balance for {owner_address}: {balance}")
+            return balance
+            
+        except ValueError as e:
+            # Address validation error - this is a client error
+            logger.error(f"❌ Address validation failed: {e}")
+            raise ValueError(str(e))
+        except Exception as e:
+            logger.error(f"❌ Failed to get {token_name} balance for {owner_address}: {e}")
+            raise Web3ServiceException(f"Failed to get {token_name} balance: {e}")
+    
+    async def get_multiple_erc20_balances(self, token_names: List[str], owner_address: str) -> Dict[str, int]:
+        """Get multiple ERC20 token balances in parallel"""
+        try:
+            logger.info(f"🪙 Fetching balances for tokens {token_names} for {owner_address}")
+            
+            # Create tasks for parallel execution
+            tasks = [self.get_erc20_balance(token_name, owner_address) for token_name in token_names]
+            
+            # Execute all tasks in parallel
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            
+            # Build response dict
+            balances = {}
+            for i, token_name in enumerate(token_names):
+                if isinstance(results[i], Exception):
+                    logger.error(f"❌ Failed to get {token_name} balance: {results[i]}")
+                    balances[token_name] = 0
+                else:
+                    balances[token_name] = results[i]
+            
+            logger.info(f"✅ Retrieved balances: {balances}")
+            return balances
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get multiple token balances: {e}")
+            raise Web3ServiceException(f"Failed to get multiple token balances: {e}")
+    
+    # =============================================================================
+    # UTILITY METHODS
+    # =============================================================================
+    
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics for monitoring"""
         return {
@@ -293,13 +388,19 @@ class Web3Service:
             "cache_maxsize": self.cache.maxsize,
             "cache_ttl": self.cache.ttl,
             "rpc_endpoints": self.rpc_endpoints,
-            "contracts_loaded": list(self.contracts.keys())
+            "contracts_loaded": list(self.contracts.keys()),
+            "nft_contracts": self.contract_addresses,
+            "token_contracts": self.token_addresses
         }
     
     def clear_cache(self):
         """Clear the cache"""
         self.cache.clear()
         logger.info("🧹 Cache cleared")
+    
+    def get_all_contract_addresses(self) -> Dict[str, str]:
+        """Get all contract addresses (NFTs + Tokens)"""
+        return {**self.contract_addresses, **self.token_addresses}
 
 # Global instance
 web3_service = Web3Service()
