@@ -253,7 +253,7 @@ async def get_user_weapons_unity(address: str = Query(..., description="Wallet a
 # NEW TOKEN BENEFITS ENDPOINTS
 # =============================================================================
 
-@router.get("/api/v1/staking/")
+@router.get("/api/v1/stake/get_data/")
 async def get_user_token_benefits(address: str = Query(..., description="Wallet address")):
     """
     Get user's token-based DeFi benefits
@@ -298,11 +298,6 @@ async def get_user_token_benefits(address: str = Query(..., description="Wallet 
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error occurred"
         )
-
-@router.get("/api/v1/users/staking/")
-async def get_user_token_benefits_alt(address: str = Query(..., description="Wallet address")):
-    """Alternative endpoint path for token benefits"""
-    return await get_user_token_benefits(address)
 
 @router.get("/api/v1/tokens/balances/")
 async def get_detailed_token_balances(address: str = Query(..., description="Wallet address")):
@@ -739,7 +734,7 @@ async def report_cheating(request: Request):
 # HEALTH CHECK AND MONITORING ENDPOINTS
 # =============================================================================
 
-@router.get("/api/v1/staking/health")
+@router.get("/api/v1/stake/get_data/health")
 async def token_benefits_health_check():
     """Health check for token benefits service"""
     try:
