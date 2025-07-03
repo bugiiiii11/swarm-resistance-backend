@@ -218,7 +218,7 @@ async def init_db():
                     (3003, 'Polytron', 'Specialist', 'Other'),
                     (3004, 'Warpath', 'Specialist', 'Other'),
                     (3005, 'MedaHero', 'Specialist', 'Other'),
-                    (3006, 'Gunstore', 'Specialist', 'Other'),
+                    (3006, 'Coinstore', 'Specialist', 'Other'),
                     (3007, 'Unstoppable Force', 'Specialist', 'Other')
                     ON CONFLICT (type_szn_id) DO NOTHING;
                 ''')
