@@ -1,4 +1,4 @@
-# app/database.py - COMPLETE with characters table integration
+# app/database.py - COMPLETE with token caching system integration
 from supabase import create_client, Client
 from sqlalchemy import create_engine, MetaData
 from sqlalchemy.ext.declarative import declarative_base
@@ -67,11 +67,15 @@ async def get_db() -> AsyncGenerator:
 
 # Database initialization
 async def init_db():
-    """Initialize database with required tables including characters table"""
+    """Initialize database with required tables including TOKEN CACHING SYSTEM"""
     try:
         pool = await get_db_pool()
         
         async with pool.acquire() as connection:
+            # ============================================
+            # EXISTING CORE TABLES
+            # ============================================
+            
             # Create users table
             await connection.execute('''
                 CREATE TABLE IF NOT EXISTS users (
@@ -227,6 +231,152 @@ async def init_db():
                 logger.info(f"✅ Characters table already contains {character_count} records")
 
             # ============================================
+            # NEW: SMART CONTRACTS REFERENCE TABLE
+            # ============================================
+            
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS smart_contracts (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(50) UNIQUE NOT NULL,
+                    address VARCHAR(42) UNIQUE NOT NULL,
+                    chain VARCHAR(20) DEFAULT 'polygon',
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+                );
+            ''')
+            
+            # Insert contract data
+            contract_count = await connection.fetchval("SELECT COUNT(*) FROM smart_contracts")
+            if contract_count == 0:
+                logger.info("🔗 Inserting smart contract data...")
+                await connection.execute('''
+                    INSERT INTO smart_contracts (name, address, chain) VALUES
+                        ('heroes', '0x27331bbfe94d1b8518816462225b16622ac74e2e', 'polygon'),
+                        ('weapons', '0x31dd72d810b34c339f2ce9119e2ebfbb9926694a', 'polygon'),
+                        ('lands', '0xaae02c81133d865d543df02b1e458de2279c4a5b', 'polygon')
+                    ON CONFLICT (name) DO NOTHING;
+                ''')
+                logger.info("✅ Smart contract data inserted successfully")
+            else:
+                logger.info(f"✅ Smart contracts table already contains {contract_count} records")
+            
+            # ============================================
+            # NEW: WEAPON MAPPING TABLE
+            # ============================================
+            
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS weapon_mappings (
+                    id SERIAL PRIMARY KEY,
+                    weapon_tier INTEGER NOT NULL,
+                    weapon_type INTEGER NOT NULL,
+                    weapon_subtype INTEGER NOT NULL,
+                    category INTEGER NOT NULL,
+                    weapon_name VARCHAR(100) NOT NULL,
+                    UNIQUE(weapon_tier, weapon_type, weapon_subtype, category)
+                );
+            ''')
+            
+            # Insert weapon mapping data
+            weapon_count = await connection.fetchval("SELECT COUNT(*) FROM weapon_mappings")
+            if weapon_count == 0:
+                logger.info("⚔️ Inserting weapon mapping data...")
+                await connection.execute('''
+                    INSERT INTO weapon_mappings (weapon_tier, weapon_type, weapon_subtype, category, weapon_name) VALUES
+                        -- WEAPON_TIER_COMMON (1) - WEAPON_TYPE_RANGE (2)
+                        (1, 2, 1, 1, 'Viper'),
+                        (1, 2, 1, 2, 'Underdog Meda-Gun'),
+                        (1, 2, 1, 3, 'Adept''s Repeater'),
+                        (1, 2, 1, 4, 'Sandcrawler''s Sniper Rifle'),
+                        -- WEAPON_TIER_COMMON (1) - WEAPON_TYPE_MELEE (1)
+                        (1, 1, 1, 1, 'Gladiator''s Greatsword'),
+                        (1, 1, 1, 2, 'Ryoshi Katana'),
+                        (1, 1, 1, 3, 'Tactician''s Claymore'),
+                        (1, 1, 1, 4, 'Blessed Blade'),
+                        -- WEAPON_TIER_RARE (2) - WEAPON_TYPE_RANGE (2)
+                        (2, 2, 1, 1, 'Serpent''s Bite'),
+                        (2, 2, 1, 2, 'Victim''s Meda-Gun'),
+                        (2, 2, 1, 3, 'Soldier''s Repeater'),
+                        (2, 2, 1, 4, 'Tundrastalker''s Sniper Rifle'),
+                        -- WEAPON_TIER_RARE (2) - WEAPON_TYPE_MELEE (1)
+                        (2, 1, 1, 1, 'Mercilles''s Greatsword'),
+                        (2, 1, 1, 2, 'Tadashi Katana'),
+                        (2, 1, 1, 3, 'Righteous Claymore'),
+                        (2, 1, 1, 4, 'Moon Blade')
+                    ON CONFLICT (weapon_tier, weapon_type, weapon_subtype, category) DO NOTHING;
+                ''')
+                logger.info("✅ Weapon mapping data inserted successfully")
+            else:
+                logger.info(f"✅ Weapon mappings table already contains {weapon_count} records")
+            
+            # ============================================
+            # NEW: HEROES TOKEN CACHE TABLE
+            # ============================================
+            
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS heroes_token_cache (
+                    id SERIAL PRIMARY KEY,
+                    bc_id INTEGER UNIQUE NOT NULL,  -- token_id from blockchain (Unity's id)
+                    -- getAttribs data
+                    sec INTEGER NOT NULL DEFAULT 0,
+                    ano INTEGER NOT NULL DEFAULT 0,
+                    inn INTEGER NOT NULL DEFAULT 0,
+                    -- getTokenInfo data
+                    season_card_id INTEGER NOT NULL DEFAULT 0,
+                    serial_number INTEGER NOT NULL DEFAULT 0,
+                    -- Additional computed fields
+                    card_type INTEGER,
+                    season_id INTEGER,
+                    card_season_collection_id INTEGER,
+                    -- Cache management
+                    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    is_valid BOOLEAN DEFAULT TRUE
+                );
+            ''')
+            
+            # ============================================
+            # NEW: WEAPONS TOKEN CACHE TABLE
+            # ============================================
+            
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS weapons_token_cache (
+                    id SERIAL PRIMARY KEY,
+                    bc_id INTEGER UNIQUE NOT NULL,  -- token_id from blockchain (Unity's id)
+                    -- getAttribs data
+                    security INTEGER NOT NULL DEFAULT 0,
+                    anonymity INTEGER NOT NULL DEFAULT 0,
+                    innovation INTEGER NOT NULL DEFAULT 0,
+                    -- getTokenInfo data
+                    weapon_tier INTEGER NOT NULL DEFAULT 1,
+                    weapon_type INTEGER NOT NULL DEFAULT 1,
+                    weapon_subtype INTEGER NOT NULL DEFAULT 1,
+                    category INTEGER NOT NULL DEFAULT 1,
+                    serial_number INTEGER NOT NULL DEFAULT 1,
+                    -- Cache management
+                    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    is_valid BOOLEAN DEFAULT TRUE
+                );
+            ''')
+            
+            # ============================================
+            # NEW: TOKEN CACHE ERROR LOG TABLE
+            # ============================================
+            
+            await connection.execute('''
+                CREATE TABLE IF NOT EXISTS token_cache_errors (
+                    id SERIAL PRIMARY KEY,
+                    contract_type VARCHAR(20) NOT NULL,  -- 'heroes' or 'weapons'
+                    token_id INTEGER NOT NULL,
+                    error_type VARCHAR(50) NOT NULL,     -- 'contract_call_failed', 'invalid_response', etc.
+                    error_message TEXT,
+                    wallet_address VARCHAR(42),
+                    retry_count INTEGER DEFAULT 0,
+                    resolved BOOLEAN DEFAULT FALSE,
+                    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                    resolved_at TIMESTAMP WITH TIME ZONE
+                );
+            ''')
+
+            # ============================================
             # MEDASHOOTER-SPECIFIC TABLES
             # ============================================
             
@@ -360,7 +510,11 @@ async def init_db():
                 );
             ''')
             
-            # Create indexes for better performance
+            # ============================================
+            # CREATE INDEXES FOR BETTER PERFORMANCE
+            # ============================================
+            
+            # Existing indexes
             await connection.execute('''
                 CREATE INDEX IF NOT EXISTS idx_users_wallet_address ON users(wallet_address);
                 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -392,7 +546,38 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_characters_class ON characters(class);
                 CREATE INDEX IF NOT EXISTS idx_characters_fraction ON characters(fraction);
                 CREATE INDEX IF NOT EXISTS idx_characters_title ON characters(title);
+            ''')
+            
+            # NEW: Token caching indexes
+            await connection.execute('''
+                -- Smart contracts indexes
+                CREATE INDEX IF NOT EXISTS idx_smart_contracts_name ON smart_contracts(name);
+                CREATE INDEX IF NOT EXISTS idx_smart_contracts_address ON smart_contracts(address);
                 
+                -- Weapon mappings indexes
+                CREATE INDEX IF NOT EXISTS idx_weapon_mappings_lookup ON weapon_mappings(weapon_tier, weapon_type, weapon_subtype, category);
+                
+                -- Heroes cache indexes
+                CREATE INDEX IF NOT EXISTS idx_heroes_cache_bc_id ON heroes_token_cache(bc_id);
+                CREATE INDEX IF NOT EXISTS idx_heroes_cache_season_card_id ON heroes_token_cache(season_card_id);
+                CREATE INDEX IF NOT EXISTS idx_heroes_cache_last_updated ON heroes_token_cache(last_updated);
+                CREATE INDEX IF NOT EXISTS idx_heroes_cache_is_valid ON heroes_token_cache(is_valid);
+                
+                -- Weapons cache indexes
+                CREATE INDEX IF NOT EXISTS idx_weapons_cache_bc_id ON weapons_token_cache(bc_id);
+                CREATE INDEX IF NOT EXISTS idx_weapons_cache_weapon_tier ON weapons_token_cache(weapon_tier);
+                CREATE INDEX IF NOT EXISTS idx_weapons_cache_last_updated ON weapons_token_cache(last_updated);
+                CREATE INDEX IF NOT EXISTS idx_weapons_cache_is_valid ON weapons_token_cache(is_valid);
+                
+                -- Error log indexes
+                CREATE INDEX IF NOT EXISTS idx_token_cache_errors_contract_type ON token_cache_errors(contract_type);
+                CREATE INDEX IF NOT EXISTS idx_token_cache_errors_token_id ON token_cache_errors(token_id);
+                CREATE INDEX IF NOT EXISTS idx_token_cache_errors_resolved ON token_cache_errors(resolved);
+                CREATE INDEX IF NOT EXISTS idx_token_cache_errors_created_at ON token_cache_errors(created_at);
+            ''')
+            
+            # MedaShooter indexes
+            await connection.execute('''
                 CREATE INDEX IF NOT EXISTS idx_medashooter_unity_scores_submission_time ON medashooter_unity_scores(submission_time);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_player_address ON medashooter_scores(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_scores_final_score ON medashooter_scores(final_score);
@@ -407,6 +592,10 @@ async def init_db():
                 CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_address ON medashooter_blacklist(player_address);
                 CREATE INDEX IF NOT EXISTS idx_medashooter_blacklist_active ON medashooter_blacklist(active);
             ''')
+            
+            # ============================================
+            # HELPER FUNCTIONS AND TRIGGERS
+            # ============================================
             
             # Create updated_at trigger function
             await connection.execute('''
@@ -434,7 +623,177 @@ async def init_db():
                     EXECUTE FUNCTION update_updated_at_column();
             ''')
 
-            # Create helper functions for anti-cheat
+            # ============================================
+            # NEW: TOKEN CACHING HELPER FUNCTIONS
+            # ============================================
+            
+            # Function to get contract address by name
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION get_contract_address(contract_name TEXT)
+                RETURNS TEXT AS $$
+                DECLARE
+                    contract_address TEXT;
+                BEGIN
+                    SELECT address INTO contract_address 
+                    FROM smart_contracts 
+                    WHERE name = contract_name AND is_active = TRUE;
+                    
+                    IF contract_address IS NULL THEN
+                        RAISE EXCEPTION 'Contract % not found or inactive', contract_name;
+                    END IF;
+                    
+                    RETURN contract_address;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # Function to get weapon name from mapping
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION get_weapon_name(
+                    p_weapon_tier INTEGER,
+                    p_weapon_type INTEGER,
+                    p_weapon_subtype INTEGER,
+                    p_category INTEGER
+                )
+                RETURNS TEXT AS $$
+                DECLARE
+                    weapon_name TEXT;
+                BEGIN
+                    SELECT wm.weapon_name INTO weapon_name
+                    FROM weapon_mappings wm
+                    WHERE wm.weapon_tier = p_weapon_tier
+                      AND wm.weapon_type = p_weapon_type
+                      AND wm.weapon_subtype = p_weapon_subtype
+                      AND wm.category = p_category;
+                    
+                    IF weapon_name IS NULL THEN
+                        -- Fallback naming
+                        IF p_weapon_type = 2 THEN
+                            weapon_name := 'T' || p_weapon_tier || ' Gun #' || p_category;
+                        ELSIF p_weapon_type = 1 THEN
+                            weapon_name := 'T' || p_weapon_tier || ' Sword #' || p_category;
+                        ELSE
+                            weapon_name := 'T' || p_weapon_tier || ' Weapon #' || p_category;
+                        END IF;
+                    END IF;
+                    
+                    RETURN weapon_name;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # Function to calculate hero card data from season_card_id
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION calculate_hero_card_data(season_card_id INTEGER)
+                RETURNS TABLE(card_type INTEGER, season_id INTEGER, card_season_collection_id INTEGER) AS $$
+                BEGIN
+                    RETURN QUERY SELECT 
+                        season_card_id / 1000 AS card_type,
+                        (season_card_id % 1000) / 10 AS season_id,
+                        season_card_id % 10 AS card_season_collection_id;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # Function to get cache statistics
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION get_cache_statistics()
+                RETURNS TABLE(
+                    heroes_cached INTEGER,
+                    weapons_cached INTEGER,
+                    heroes_invalid INTEGER,
+                    weapons_invalid INTEGER,
+                    total_errors INTEGER,
+                    unresolved_errors INTEGER
+                ) AS $$
+                BEGIN
+                    RETURN QUERY
+                    SELECT 
+                        (SELECT COUNT(*)::INTEGER FROM heroes_token_cache WHERE is_valid = TRUE),
+                        (SELECT COUNT(*)::INTEGER FROM weapons_token_cache WHERE is_valid = TRUE),
+                        (SELECT COUNT(*)::INTEGER FROM heroes_token_cache WHERE is_valid = FALSE),
+                        (SELECT COUNT(*)::INTEGER FROM weapons_token_cache WHERE is_valid = FALSE),
+                        (SELECT COUNT(*)::INTEGER FROM token_cache_errors),
+                        (SELECT COUNT(*)::INTEGER FROM token_cache_errors WHERE resolved = FALSE);
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # Function to invalidate old cache entries
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION invalidate_old_cache_entries(days_old INTEGER DEFAULT 30)
+                RETURNS INTEGER AS $$
+                DECLARE
+                    affected_rows INTEGER;
+                BEGIN
+                    WITH updated_heroes AS (
+                        UPDATE heroes_token_cache 
+                        SET is_valid = FALSE 
+                        WHERE last_updated < NOW() - INTERVAL '1 day' * days_old AND is_valid = TRUE
+                        RETURNING 1
+                    ),
+                    updated_weapons AS (
+                        UPDATE weapons_token_cache 
+                        SET is_valid = FALSE 
+                        WHERE last_updated < NOW() - INTERVAL '1 day' * days_old AND is_valid = TRUE
+                        RETURNING 1
+                    )
+                    SELECT (SELECT COUNT(*) FROM updated_heroes) + (SELECT COUNT(*) FROM updated_weapons)
+                    INTO affected_rows;
+                    
+                    RETURN affected_rows;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # ============================================
+            # NEW: AUTO-UPDATE TRIGGERS FOR TOKEN CACHE
+            # ============================================
+            
+            # Trigger to auto-calculate hero card data
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION update_hero_card_data()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    -- Calculate card data from season_card_id
+                    SELECT card_type, season_id, card_season_collection_id
+                    INTO NEW.card_type, NEW.season_id, NEW.card_season_collection_id
+                    FROM calculate_hero_card_data(NEW.season_card_id);
+                    
+                    -- Update timestamp
+                    NEW.last_updated = NOW();
+                    
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            await connection.execute('''
+                DROP TRIGGER IF EXISTS trigger_update_hero_card_data ON heroes_token_cache;
+                CREATE TRIGGER trigger_update_hero_card_data
+                    BEFORE INSERT OR UPDATE ON heroes_token_cache
+                    FOR EACH ROW EXECUTE FUNCTION update_hero_card_data();
+            ''')
+            
+            # Trigger to update weapons timestamp
+            await connection.execute('''
+                CREATE OR REPLACE FUNCTION update_weapons_timestamp()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    NEW.last_updated = NOW();
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            await connection.execute('''
+                DROP TRIGGER IF EXISTS trigger_update_weapons_timestamp ON weapons_token_cache;
+                CREATE TRIGGER trigger_update_weapons_timestamp
+                    BEFORE UPDATE ON weapons_token_cache
+                    FOR EACH ROW EXECUTE FUNCTION update_weapons_timestamp();
+            ''')
+
+            # Helper functions for anti-cheat (existing MedaShooter functions)
             await connection.execute('''
                 CREATE OR REPLACE FUNCTION is_address_blacklisted(check_address TEXT)
                 RETURNS BOOLEAN AS $$
@@ -447,7 +806,7 @@ async def init_db():
                 $$ LANGUAGE plpgsql;
             ''')
 
-            # Auto-update player stats after score submission
+            # Auto-update player stats after score submission (existing MedaShooter function)
             await connection.execute('''
                 CREATE OR REPLACE FUNCTION update_player_stats_after_score()
                 RETURNS TRIGGER AS $$
@@ -476,7 +835,9 @@ async def init_db():
                     FOR EACH ROW EXECUTE FUNCTION update_player_stats_after_score();
             ''')
             
-        logger.info("✅ Database initialized successfully with all tables including characters!")
+        logger.info("✅ Database initialized successfully with TOKEN CACHING SYSTEM!")
+        logger.info("🚀 Smart contract call optimization is now active!")
+        logger.info("🎯 Features added: Heroes cache, Weapons cache, Smart contracts table, Weapon mappings")
         
     except Exception as e:
         logger.error(f"❌ Database initialization failed: {str(e)}")
@@ -540,7 +901,7 @@ async def check_db_health() -> dict:
             "timestamp": asyncio.get_event_loop().time()
         }
 
-# Character data helper functions
+# Character data helper functions (existing)
 async def get_character_by_season_card_id(season_card_id: int) -> dict:
     """Get character data by season_card_id (type_szn_id)"""
     try:
@@ -563,6 +924,64 @@ async def get_all_characters() -> list:
     except Exception as e:
         logger.error(f"Failed to get all characters: {e}")
         return []
+
+# ============================================================================
+# NEW: TOKEN CACHE HELPER FUNCTIONS
+# ============================================================================
+
+async def get_contract_address_by_name(contract_name: str) -> str:
+    """Get contract address by name from database"""
+    try:
+        result = await execute_query(
+            "SELECT address FROM smart_contracts WHERE name = $1 AND is_active = TRUE",
+            contract_name
+        )
+        return result[0]['address'] if result else None
+    except Exception as e:
+        logger.error(f"Failed to get contract address for {contract_name}: {e}")
+        return None
+
+async def get_weapon_name_by_stats(weapon_tier: int, weapon_type: int, weapon_subtype: int, category: int) -> str:
+    """Get weapon name from mapping table"""
+    try:
+        result = await execute_query(
+            """SELECT weapon_name FROM weapon_mappings 
+               WHERE weapon_tier = $1 AND weapon_type = $2 
+               AND weapon_subtype = $3 AND category = $4""",
+            weapon_tier, weapon_type, weapon_subtype, category
+        )
+        return result[0]['weapon_name'] if result else None
+    except Exception as e:
+        logger.error(f"Failed to get weapon name for {weapon_tier}/{weapon_type}/{weapon_subtype}/{category}: {e}")
+        return None
+
+async def get_token_cache_statistics() -> dict:
+    """Get token cache statistics"""
+    try:
+        result = await execute_query("SELECT * FROM get_cache_statistics()")
+        if result:
+            stats = result[0]
+            return {
+                "heroes_cached": stats['heroes_cached'],
+                "weapons_cached": stats['weapons_cached'],
+                "heroes_invalid": stats['heroes_invalid'],
+                "weapons_invalid": stats['weapons_invalid'],
+                "total_errors": stats['total_errors'],
+                "unresolved_errors": stats['unresolved_errors']
+            }
+        return {}
+    except Exception as e:
+        logger.error(f"Failed to get cache statistics: {e}")
+        return {}
+
+async def invalidate_cache_entries(days_old: int = 30) -> int:
+    """Invalidate old cache entries"""
+    try:
+        result = await execute_query("SELECT invalidate_old_cache_entries($1)", days_old)
+        return result[0] if result else 0
+    except Exception as e:
+        logger.error(f"Failed to invalidate cache entries: {e}")
+        return 0
 
 # Cleanup function
 async def close_db_pool():

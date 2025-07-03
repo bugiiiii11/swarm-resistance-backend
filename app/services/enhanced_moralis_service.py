@@ -1,10 +1,11 @@
-# services/enhanced_moralis_service.py - COMPLETE with database integration
+# services/enhanced_moralis_service.py - UPDATED with TokenCacheService integration
 import logging
 from typing import Dict, List, Optional, Any
 import asyncio
 
-# Import our new Web3 service
+# Import our Web3 service and the new TokenCacheService
 from .web3_service import web3_service, Web3ServiceException
+from .token_cache_service import TokenCacheService
 
 logger = logging.getLogger(__name__)
 
@@ -76,172 +77,55 @@ WEAPONS_ABI = [
 
 class EnhancedMoralisService:
     """
-    Enhanced service that replicates your original Django backend logic
-    Now uses Web3.py for direct smart contract calls instead of Moralis
-    Includes database integration for character data
+    Enhanced service with smart contract caching
+    Now uses TokenCacheService to minimize blockchain calls
+    Maintains exact Unity compatibility while dramatically improving performance
     """
     
     def __init__(self):
         self.chain = "polygon"
         
-        # Weapon mappings from your original weapon.py
-        self.WEAPON_NAME_MAPPING = {
-            1: {  # WEAPON_TIER_COMMON
-                2: {  # WEAPON_TYPE_RANGE (Gun)
-                    1: {  # WEAPON_SUBTYPE_ONE
-                        1: "Viper",
-                        2: "Underdog Meda-Gun", 
-                        3: "Adept's Repeater",
-                        4: "Sandcrawler's Sniper Rifle",
-                    }
-                },
-                1: {  # WEAPON_TYPE_MELEE (Sword)
-                    1: {
-                        1: "Gladiator's Greatsword",
-                        2: "Ryoshi Katana",
-                        3: "Tactician's Claymore", 
-                        4: "Blessed Blade",
-                    }
-                }
-            },
-            2: {  # WEAPON_TIER_RARE
-                2: {  # WEAPON_TYPE_RANGE
-                    1: {
-                        1: "Serpent's Bite",
-                        2: "Victim's Meda-Gun",
-                        3: "Soldier's Repeater",
-                        4: "Tundrastalker's Sniper Rifle",
-                    }
-                },
-                1: {  # WEAPON_TYPE_MELEE
-                    1: {
-                        1: "Mercilles's Greatsword",
-                        2: "Tadashi Katana", 
-                        3: "Righteous Claymore",
-                        4: "Moon Blade",
-                    }
-                }
-            }
-        }
+        # Initialize token cache service (will be set up after database import)
+        self.token_cache_service = None
         
-        logger.info("✅ Enhanced Moralis service initialized with Web3.py backend and database integration")
+        logger.info("✅ Enhanced Moralis service initialized with caching support")
     
-    def _get_weapon_name(self, weapon_tier: int, weapon_type: int, weapon_subtype: int, category: int) -> str:
-        """Get weapon name using your original mapping logic"""
-        try:
-            return self.WEAPON_NAME_MAPPING[weapon_tier][weapon_type][weapon_subtype][category]
-        except (KeyError, IndexError):
-            # Fallback naming
-            type_name = "Gun" if weapon_type == 2 else "Sword" if weapon_type == 1 else "Weapon"
-            return f"T{weapon_tier} {type_name} #{category}"
+    def _get_cache_service(self):
+        """Lazy initialization of TokenCacheService to avoid circular imports"""
+        if self.token_cache_service is None:
+            # Import database module at runtime to avoid circular imports
+            from .. import database
+            self.token_cache_service = TokenCacheService(web3_service, database)
+            logger.info("✅ TokenCacheService initialized")
+        
+        return self.token_cache_service
     
     async def get_heroes_for_unity(self, address: str) -> Dict:
         """
-        Get Heroes NFTs with Unity-compatible format using Web3.py
-        Returns exact format Unity expects: paginated with "sec"/"ano"/"inn"
-        Enhanced with database character lookup
+        Get Heroes NFTs with Unity-compatible format using smart caching
+        Returns exact format Unity expects with significant performance improvement
         """
         try:
-            logger.info(f"🦸 Fetching Heroes for {address} using Web3.py with database integration")
+            logger.info(f"🦸 Fetching Heroes for {address} using smart caching")
             
-            # Import database function at method level to avoid circular imports
-            from ..database import execute_query
+            # Get cache service
+            cache_service = self._get_cache_service()
             
-            # Get all token IDs owned by this address
-            token_ids = await web3_service.get_tokens_of_owner('heroes', HEROES_ABI, address)
+            # Use cached approach - this handles:
+            # 1. tokensOfOwner() call (always fresh)
+            # 2. Cache lookup for token attributes/info
+            # 3. Smart contract calls only for missing tokens
+            # 4. Database integration for character data
+            heroes = await cache_service.get_heroes_with_cache(address, HEROES_ABI)
             
-            if not token_ids:
-                logger.info(f"No heroes found for {address}")
-                return {"results": [], "count": 0, "next": None}
-            
-            heroes = []
-            
-            for token_id in token_ids:
-                try:
-                    # Get attributes and token info in parallel
-                    attributes_task = web3_service.get_token_attributes('heroes', HEROES_ABI, token_id)
-                    info_task = web3_service.get_token_info('heroes', HEROES_ABI, token_id)
-                    
-                    attributes, hero_info = await asyncio.gather(attributes_task, info_task)
-                    
-                    # Extract season_card_id from smart contract data
-                    season_card_id = hero_info.get("season_card_id", 0)
-                    
-                    # Default values in case database lookup fails
-                    title = f"Hero #{token_id}"
-                    fraction = "Neutral"
-                    card_class = "SPECIALIST"
-                    
-                    # Lookup character data from database using season_card_id
-                    if season_card_id:
-                        try:
-                            character_data = await execute_query(
-                                "SELECT title, fraction, class FROM characters WHERE type_szn_id = $1",
-                                season_card_id
-                            )
-                            
-                            if character_data:
-                                # Found character in database - use actual data
-                                character = character_data[0]
-                                title = character["title"]
-                                fraction = character["fraction"]
-                                
-                                # Map database class to Unity card_class format
-                                db_class = character["class"]
-                                if db_class == "Harvester":
-                                    card_class = "HARVESTER"
-                                elif db_class == "Warmonger":
-                                    card_class = "WARMONGER"
-                                elif db_class == "Defender":
-                                    card_class = "DEFENDER"
-                                elif db_class == "Specialist":
-                                    card_class = "SPECIALIST"
-                                elif db_class == "Revolutionist":
-                                    card_class = "REVOLUTIONIST"
-                                else:
-                                    card_class = "SPECIALIST"  # fallback
-                                
-                                logger.debug(f"✅ Found character data for token {token_id} (season_card_id: {season_card_id}): {title} - {fraction} - {card_class}")
-                            else:
-                                logger.warning(f"⚠️ No character found for season_card_id: {season_card_id} (token {token_id})")
-                        except Exception as db_error:
-                            logger.error(f"❌ Database lookup failed for season_card_id {season_card_id}: {db_error}")
-                            # Continue with default values
-                    
-                    # Create Unity-compatible hero object with actual character data
-                    hero = {
-                        "id": token_id,
-                        "bc_id": token_id,
-                        "title": title,
-                        "fraction": fraction,
-                        "owner": address.lower(),
-                        "card_class": card_class,
-                        "reward": {
-                            "power": hero_info.get("serial_number", 1)
-                        },
-                        "metadata": {
-                            "sec": attributes["sec"],
-                            "ano": attributes["ano"],
-                            "inn": attributes["inn"],
-                            "revolution": hero_info.get("card_type") == 2,
-                            "season_card_id": season_card_id  # Include for debugging
-                        }
-                    }
-                    
-                    heroes.append(hero)
-                    logger.debug(f"✅ Hero {token_id}: {title} ({card_class}/{fraction}) - sec={attributes['sec']}, ano={attributes['ano']}, inn={attributes['inn']}")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing hero {token_id}: {e}")
-                    continue
-            
+            # Build Unity-compatible response format
             result = {
                 "results": heroes,
                 "count": len(heroes),
                 "next": None
             }
             
-            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with character data from database")
+            logger.info(f"✅ Successfully fetched {len(heroes)} Heroes with smart caching (reduced contract calls)")
             return result
             
         except ValueError as e:
@@ -258,59 +142,23 @@ class EnhancedMoralisService:
     
     async def get_weapons_for_unity(self, address: str) -> List[Dict]:
         """
-        Get Weapons NFTs with Unity-compatible format using Web3.py
-        Returns exact format Unity expects: direct array with "security"/"anonymity"/"innovation"
+        Get Weapons NFTs with Unity-compatible format using smart caching
+        Returns exact format Unity expects with significant performance improvement
         """
         try:
-            logger.info(f"⚔️ Fetching Weapons for {address} using Web3.py")
+            logger.info(f"⚔️ Fetching Weapons for {address} using smart caching")
             
-            # Get all token IDs owned by this address
-            token_ids = await web3_service.get_tokens_of_owner('weapons', WEAPONS_ABI, address)
+            # Get cache service
+            cache_service = self._get_cache_service()
             
-            if not token_ids:
-                logger.info(f"No weapons found for {address}")
-                return []
+            # Use cached approach - this handles:
+            # 1. tokensOfOwner() call (always fresh)  
+            # 2. Cache lookup for token attributes/info
+            # 3. Smart contract calls only for missing tokens
+            # 4. Database integration for weapon name mapping
+            weapons = await cache_service.get_weapons_with_cache(address, WEAPONS_ABI)
             
-            weapons = []
-            
-            for token_id in token_ids:
-                try:
-                    # Get attributes and weapon info in parallel
-                    attributes_task = web3_service.get_token_attributes('weapons', WEAPONS_ABI, token_id)
-                    info_task = web3_service.get_token_info('weapons', WEAPONS_ABI, token_id)
-                    
-                    attributes, weapon_info = await asyncio.gather(attributes_task, info_task)
-                    
-                    # Get weapon name using your original mapping
-                    weapon_name = self._get_weapon_name(
-                        weapon_info["weapon_tier"],
-                        weapon_info["weapon_type"],
-                        weapon_info["weapon_subtype"],
-                        weapon_info["category"]
-                    )
-                    
-                    # Create Unity-compatible weapon object (exact format from your docs)
-                    weapon = {
-                        "id": token_id,
-                        "bc_id": token_id,
-                        "owner_address": address.lower(),
-                        "contract_address": web3_service.contract_addresses['weapons'].lower(),
-                        "weapon_name": weapon_name,
-                        "security": attributes["security"],      # Unity expects "security" (full word)
-                        "anonymity": attributes["anonymity"],    # Unity expects "anonymity" (full word)
-                        "innovation": attributes["innovation"],  # Unity expects "innovation" (full word)
-                        "minted": True,
-                        "burned": False
-                    }
-                    
-                    weapons.append(weapon)
-                    logger.debug(f"✅ Weapon {token_id} ({weapon_name}): security={attributes['security']}, anonymity={attributes['anonymity']}, innovation={attributes['innovation']}")
-                    
-                except Exception as e:
-                    logger.error(f"Error processing weapon {token_id}: {e}")
-                    continue
-            
-            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons with live blockchain attributes")
+            logger.info(f"✅ Successfully fetched {len(weapons)} Weapons with smart caching (reduced contract calls)")
             return weapons
             
         except ValueError as e:
@@ -328,11 +176,12 @@ class EnhancedMoralisService:
     async def get_enhanced_player_data(self, address: str, chain: str = "polygon") -> Dict:
         """
         Get comprehensive NFT data with enhanced boost calculations
+        Now uses smart caching for improved performance
         """
         try:
-            logger.info(f"🎮 Fetching enhanced player data for {address}")
+            logger.info(f"🎮 Fetching enhanced player data for {address} with smart caching")
             
-            # Fetch all NFT types in parallel
+            # Fetch all NFT types in parallel using the cached methods
             heroes_task = self.get_heroes_for_unity(address)
             weapons_task = self.get_weapons_for_unity(address)
             
@@ -375,7 +224,8 @@ class EnhancedMoralisService:
                     "total": hero_count + weapon_count
                 },
                 "boosts": boosts,
-                "timestamp": int(asyncio.get_event_loop().time())
+                "timestamp": int(asyncio.get_event_loop().time()),
+                "cache_enabled": True  # Indicate caching is active
             }
             
         except ValueError as e:
@@ -389,6 +239,101 @@ class EnhancedMoralisService:
         except Exception as e:
             logger.error(f"❌ Unexpected error getting enhanced player data: {e}")
             raise Web3ServiceException(f"Unexpected error: {e}")
+    
+    # ============================================================================
+    # CACHE MANAGEMENT METHODS (NEW)
+    # ============================================================================
+    
+    async def invalidate_token_cache(self, contract_type: str, token_ids: List[int] = None):
+        """
+        Invalidate cache entries for specific tokens or entire contract types
+        Useful for manual cache management or when token data changes
+        """
+        try:
+            cache_service = self._get_cache_service()
+            await cache_service.invalidate_token_cache(contract_type, token_ids)
+            
+            if token_ids:
+                logger.info(f"✅ Invalidated cache for {len(token_ids)} {contract_type} tokens")
+            else:
+                logger.info(f"✅ Invalidated all {contract_type} cache entries")
+                
+        except Exception as e:
+            logger.error(f"❌ Failed to invalidate cache: {e}")
+            raise
+    
+    async def get_cache_statistics(self) -> Dict[str, Any]:
+        """
+        Get cache performance statistics for monitoring
+        """
+        try:
+            cache_service = self._get_cache_service()
+            stats = await cache_service.get_cache_statistics()
+            
+            # Add service-level stats
+            stats.update({
+                "service_name": "EnhancedMoralisService",
+                "caching_enabled": True,
+                "web3_cache_stats": web3_service.get_cache_stats()
+            })
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to get cache statistics: {e}")
+            return {"error": str(e)}
+    
+    async def force_refresh_token(self, contract_type: str, token_id: int) -> Dict[str, Any]:
+        """
+        Force refresh a specific token from blockchain (bypass cache)
+        Useful for debugging or when you need fresh data
+        """
+        try:
+            logger.info(f"🔄 Force refreshing {contract_type} token {token_id}")
+            
+            # Invalidate cache first
+            await self.invalidate_token_cache(contract_type, [token_id])
+            
+            # The next call will fetch fresh data from blockchain
+            if contract_type == 'heroes':
+                # We need an address to test with, but this is mainly for debugging
+                # In practice, you'd call this through the normal flow
+                result = {"message": f"Cache invalidated for heroes token {token_id}"}
+            elif contract_type == 'weapons':
+                result = {"message": f"Cache invalidated for weapons token {token_id}"}
+            else:
+                raise ValueError(f"Unknown contract type: {contract_type}")
+            
+            logger.info(f"✅ Force refresh completed for {contract_type} token {token_id}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to force refresh token: {e}")
+            raise
+    
+    async def cleanup_cache_errors(self, days_old: int = 7) -> int:
+        """
+        Clean up old cache error entries
+        Returns number of cleaned up entries
+        """
+        try:
+            cache_service = self._get_cache_service()
+            cleaned_count = await cache_service.cleanup_old_errors(days_old)
+            
+            logger.info(f"✅ Cleaned up {cleaned_count} old cache error entries")
+            return cleaned_count
+            
+        except Exception as e:
+            logger.error(f"❌ Failed to cleanup cache errors: {e}")
+            return 0
+    
+    # ============================================================================
+    # LEGACY METHODS (REMOVED - now handled by TokenCacheService)
+    # ============================================================================
+    
+    # The old direct smart contract methods are removed since they're now
+    # handled internally by TokenCacheService with smart caching
+    # This keeps the public API clean while adding caching behind the scenes
 
 # Create global instance
 enhanced_moralis_service = EnhancedMoralisService()
