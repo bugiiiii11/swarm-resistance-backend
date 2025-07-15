@@ -618,7 +618,7 @@ async def init_db():
                     rank BIGINT,
                     player_address VARCHAR(42),
                     final_score INTEGER,
-                    submission_time TIMESTAMP WITH TIME ZONE,
+                    submission_time TIMESTAMP WITHOUT TIME ZONE,
                     nft_boosts_used JSONB
                 ) AS $$
                 BEGIN
