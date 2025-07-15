@@ -1,4 +1,4 @@
-# routes/medashooter_routes.py - COMPLETE with token benefits and score submission
+# routes/medashooter_routes.py - COMPLETE with duplicate prevention and token benefits
 from fastapi import APIRouter, Query, HTTPException, status, Request
 from fastapi.responses import PlainTextResponse
 from typing import Optional, Dict, Any
@@ -388,7 +388,7 @@ async def get_medashooter_timestamp():
 async def submit_medashooter_score(request: Request):
     """
     Submit encrypted score data from Unity game
-    Handles RSA decryption and score validation
+    Handles RSA decryption and score validation with duplicate prevention
     """
     if not SERVICES_AVAILABLE:
         raise HTTPException(
@@ -491,7 +491,7 @@ async def submit_medashooter_score(request: Request):
             # Still return success to Unity (don't reveal anti-cheat detection)
             return {"status": "Score updated"}
         
-        # Score is valid - save to database
+        # Score is valid - save to database with duplicate prevention
         try:
             # Store raw encrypted submission first
             unity_score_id = await execute_query(
@@ -527,22 +527,66 @@ async def submit_medashooter_score(request: Request):
             
             unity_score_record_id = unity_score_id[0]['id']
             
-            # Check if player already has a score
+            # =========================================================================
+            # DUPLICATE PREVENTION LOGIC - Check if player already has a score
+            # =========================================================================
+            
             existing_score = await execute_query(
-                "SELECT final_score FROM medashooter_scores WHERE player_address = $1 ORDER BY final_score DESC LIMIT 1",
+                """SELECT id, final_score FROM medashooter_scores 
+                   WHERE player_address = $1 AND validated = TRUE 
+                   ORDER BY final_score DESC LIMIT 1""",
                 player_address
             )
             
-            should_update = True
-            if existing_score and existing_score[0]['final_score'] >= calculated_score:
-                should_update = False
-                logger.info(f"⏭️ Score {calculated_score} not better than existing {existing_score[0]['final_score']}")
-            
-            if should_update:
+            if existing_score:
+                # Update existing record if new score is better
+                if calculated_score > existing_score[0]['final_score']:
+                    # Get NFT boost data
+                    nft_boosts = await get_nft_boosts_for_player(player_address)
+                    
+                    await execute_command(
+                        """UPDATE medashooter_scores 
+                           SET final_score = $1, calculated_score = $2, submission_time = $3,
+                               enemies_killed = $4, enemies_spawned = $5, game_duration = $6,
+                               waves_completed = $7, travel_distance = $8, perks_collected = $9,
+                               coins_collected = $10, shields_collected = $11, 
+                               killing_spree_mult = $12, killing_spree_duration = $13,
+                               max_killing_spree = $14, attack_speed = $15, 
+                               max_score_per_enemy = $16, max_score_per_enemy_scaled = $17,
+                               ability_use_count = $18, enemies_killed_while_killing_spree = $19,
+                               nft_boosts_used = $20, unity_score_id = $21
+                           WHERE id = $22""",
+                        min(calculated_score, 60000),  # Keep 60k cap
+                        calculated_score,
+                        datetime.utcnow(),
+                        decrypted_data.get('enemies_killed', 0),
+                        decrypted_data.get('enemies_spawned', 0),
+                        decrypted_data.get('duration', 0),
+                        decrypted_data.get('waves_completed', 0),
+                        decrypted_data.get('travel_distance', 0),
+                        decrypted_data.get('perks_collected', 0),
+                        decrypted_data.get('coins_collected', 0),
+                        decrypted_data.get('shields_collected', 0),
+                        decrypted_data.get('killing_spree_mult', 0),
+                        decrypted_data.get('killing_spree_duration', 0),
+                        decrypted_data.get('max_killing_spree', 0),
+                        decrypted_data.get('attack_speed', 0.0),
+                        decrypted_data.get('max_score_per_enemy', 0),
+                        decrypted_data.get('max_score_per_enemy_scaled', 0),
+                        decrypted_data.get('ability_use_count', 0),
+                        decrypted_data.get('enemies_killed_while_killing_spree', 0),
+                        json.dumps(nft_boosts),
+                        unity_score_record_id,
+                        existing_score[0]['id']
+                    )
+                    logger.info(f"✅ Updated existing score: {calculated_score} for {player_address[:8]}...")
+                else:
+                    logger.info(f"⏭️ Score {calculated_score} not better than existing {existing_score[0]['final_score']}")
+            else:
+                # Create new record for first-time player
                 # Get NFT boost data
                 nft_boosts = await get_nft_boosts_for_player(player_address)
                 
-                # Store processed score
                 await execute_command(
                     """INSERT INTO medashooter_scores 
                        (unity_score_id, player_address, final_score, calculated_score,
@@ -578,8 +622,7 @@ async def submit_medashooter_score(request: Request):
                     True,  # Validated
                     datetime.utcnow()
                 )
-                
-                logger.info(f"✅ Score saved successfully: {calculated_score} for {player_address[:8]}...")
+                logger.info(f"✅ Created new score record: {calculated_score} for {player_address[:8]}...")
             
             # Log the successful submission
             logger.info(f"🎯 Score submission processed: {calculated_score} points in {game_duration}s")
@@ -731,6 +774,75 @@ async def report_cheating(request: Request):
         )
 
 # =============================================================================
+# UPDATED LEADERBOARD ENDPOINT WITH DUPLICATE PREVENTION
+# =============================================================================
+
+@router.get("/api/game/medashooter/scoreboard")
+async def get_medashooter_scoreboard(
+    limit: int = Query(default=50, description="Number of top scores to return"),
+    player_address: Optional[str] = Query(default=None, description="Player address for user score")
+):
+    """
+    Get MedaShooter leaderboard with duplicate prevention (one score per wallet)
+    Uses optimized database function for fast performance
+    """
+    try:
+        # Get top scores (one per wallet) - SUPER FAST with our new function
+        top_scores = await execute_query(
+            "SELECT * FROM get_current_medashooter_leaderboard($1)",
+            limit
+        )
+        
+        scoreboard = []
+        for score in top_scores:
+            scoreboard.append({
+                "rank": score["rank"],
+                "address": score["player_address"],
+                "score": score["final_score"],
+                "submission_time": score["submission_time"].isoformat(),
+                "nft_boosts": score["nft_boosts_used"] or {}
+            })
+        
+        result = {
+            "scoreboard": scoreboard,
+            "total_players": len(scoreboard)
+        }
+        
+        # Add user score if requested
+        if player_address:
+            player_address = player_address.lower()
+            user_score = await execute_query(
+                """SELECT final_score, submission_time, nft_boosts_used,
+                   (SELECT COUNT(*) + 1 FROM medashooter_scores s2 
+                    WHERE s2.final_score > s1.final_score AND s2.validated = TRUE
+                    AND s2.player_address != s1.player_address) as rank
+                   FROM medashooter_scores s1
+                   WHERE player_address = $1 AND validated = TRUE
+                   ORDER BY final_score DESC LIMIT 1""",
+                player_address
+            )
+            
+            if user_score:
+                result["user_score"] = {
+                    "rank": user_score[0]["rank"],
+                    "score": user_score[0]["final_score"],
+                    "address": player_address,
+                    "submission_time": user_score[0]["submission_time"].isoformat(),
+                    "nft_boosts": user_score[0]["nft_boosts_used"] or {}
+                }
+            else:
+                result["user_score"] = None
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"❌ Scoreboard error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get scoreboard"
+        )
+
+# =============================================================================
 # HEALTH CHECK AND MONITORING ENDPOINTS
 # =============================================================================
 
@@ -815,73 +927,6 @@ async def get_enhanced_player_data(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error occurred"
-        )
-
-@router.get("/api/game/medashooter/scoreboard")
-async def get_medashooter_scoreboard(
-    limit: int = Query(default=50, description="Number of top scores to return"),
-    player_address: Optional[str] = Query(default=None, description="Player address for user score")
-):
-    """
-    Get MedaShooter leaderboard with optional user score
-    """
-    try:
-        # Get top scores
-        top_scores = await execute_query(
-            """SELECT player_address, final_score, submission_time, nft_boosts_used
-               FROM medashooter_scores 
-               WHERE validated = TRUE 
-               ORDER BY final_score DESC 
-               LIMIT $1""",
-            limit
-        )
-        
-        scoreboard = []
-        for i, score in enumerate(top_scores, 1):
-            scoreboard.append({
-                "rank": i,
-                "address": score["player_address"],
-                "score": score["final_score"],
-                "submission_time": score["submission_time"].isoformat(),
-                "nft_boosts": score["nft_boosts_used"] or {}
-            })
-        
-        result = {
-            "scoreboard": scoreboard,
-            "total_players": len(scoreboard)
-        }
-        
-        # Add user score if requested
-        if player_address:
-            player_address = player_address.lower()
-            user_score = await execute_query(
-                """SELECT final_score, submission_time, nft_boosts_used,
-                   (SELECT COUNT(*) + 1 FROM medashooter_scores s2 
-                    WHERE s2.final_score > s1.final_score AND s2.validated = TRUE) as rank
-                   FROM medashooter_scores s1
-                   WHERE player_address = $1 AND validated = TRUE
-                   ORDER BY final_score DESC LIMIT 1""",
-                player_address
-            )
-            
-            if user_score:
-                result["user_score"] = {
-                    "address": player_address,
-                    "score": user_score[0]["final_score"],
-                    "rank": user_score[0]["rank"],
-                    "submission_time": user_score[0]["submission_time"].isoformat(),
-                    "nft_boosts": user_score[0]["nft_boosts_used"] or {}
-                }
-            else:
-                result["user_score"] = None
-        
-        return result
-        
-    except Exception as e:
-        logger.error(f"❌ Scoreboard error: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get scoreboard"
         )
 
 # Debug and monitoring endpoints

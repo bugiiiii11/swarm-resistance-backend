@@ -594,6 +594,59 @@ async def init_db():
             ''')
             
             # ============================================
+            # MEDASHOOTER DUPLICATE PREVENTION OPTIMIZATION
+            # ============================================
+
+            # Single strategic index for current leaderboard performance
+            await connection.execute('''
+                -- Optimize for "get best score per player" queries
+                CREATE INDEX IF NOT EXISTS idx_medashooter_best_score_per_player 
+                ON medashooter_scores (player_address, final_score DESC, submission_time ASC) 
+                WHERE validated = TRUE;
+                
+                -- Optimize for leaderboard ranking queries
+                CREATE INDEX IF NOT EXISTS idx_medashooter_leaderboard_ranking 
+                ON medashooter_scores (final_score DESC, submission_time ASC) 
+                WHERE validated = TRUE;
+            ''')
+
+            # Helper function for efficient current leaderboard
+            await connection.execute('''
+                -- Function to get current leaderboard (one score per player)
+                CREATE OR REPLACE FUNCTION get_current_medashooter_leaderboard(p_limit INTEGER DEFAULT 50)
+                RETURNS TABLE(
+                    rank BIGINT,
+                    player_address VARCHAR(42),
+                    final_score INTEGER,
+                    submission_time TIMESTAMP WITH TIME ZONE,
+                    nft_boosts_used JSONB
+                ) AS $$
+                BEGIN
+                    RETURN QUERY
+                    WITH best_scores AS (
+                        SELECT DISTINCT ON (s.player_address) 
+                            s.player_address,
+                            s.final_score,
+                            s.submission_time,
+                            s.nft_boosts_used
+                        FROM medashooter_scores s
+                        WHERE s.validated = TRUE
+                        ORDER BY s.player_address, s.final_score DESC, s.submission_time ASC
+                    )
+                    SELECT 
+                        ROW_NUMBER() OVER (ORDER BY bs.final_score DESC, bs.submission_time ASC) as rank,
+                        bs.player_address,
+                        bs.final_score,
+                        bs.submission_time,
+                        bs.nft_boosts_used
+                    FROM best_scores bs
+                    ORDER BY bs.final_score DESC, bs.submission_time ASC
+                    LIMIT p_limit;
+                END;
+                $$ LANGUAGE plpgsql;
+            ''')
+            
+            # ============================================
             # HELPER FUNCTIONS AND TRIGGERS
             # ============================================
             
