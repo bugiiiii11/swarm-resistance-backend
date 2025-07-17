@@ -213,6 +213,8 @@ async def init_db():
                     (1043, 'Sam', 'Specialist', 'Goliath'),
                     (1044, 'Lunatic', 'Warmonger', 'Renegade'),
                     (1051, 'Shardeus', 'Defender', 'Goliath'),
+                    (1052, 'KatanaInu', 'Warmonger', 'Renegade'),
+                    (1053, 'Spinner', 'Specialist', 'Goliath'),
                     (2010, 'Commander', 'Revolutionist', 'Other'),
                     (2020, 'Floki', 'Revolutionist', 'Other'),
                     (2030, 'Nero', 'Revolutionist', 'Other'),
