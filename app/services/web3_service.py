@@ -1,4 +1,4 @@
-# services/web3_service.py - Enhanced with token contracts support
+# services/web3_service.py - Enhanced with token contracts support and ERC1155
 import asyncio
 import logging
 import time
@@ -20,6 +20,7 @@ class Web3Service:
     Robust Web3 service for Polygon smart contract interactions
     Supports multiple RPC endpoints with automatic failover
     Enhanced with ERC20 token support for DeFi benefits
+    Now includes ERC1155 support for Land Tickets
     """
     
     def __init__(self):
@@ -53,7 +54,7 @@ class Web3Service:
         # Contract instances will be loaded when needed
         self.contracts = {}
         
-        logger.info("✅ Web3Service initialized with failover RPC endpoints and token support")
+        logger.info("✅ Web3Service initialized with failover RPC endpoints, token support, and ERC1155")
     
     def _initialize_web3_instances(self):
         """Initialize Web3 instances for all RPC endpoints"""
@@ -301,7 +302,63 @@ class Web3Service:
             raise Web3ServiceException(f"Failed to get token info: {e}")
     
     # =============================================================================
-    # ERC20 TOKEN METHODS (new)
+    # ERC1155 METHODS (NEW for Land Tickets)
+    # =============================================================================
+    
+    async def get_erc1155_balances(self, contract_name: str, owner_address: str, token_ids: List[int]) -> List[int]:
+        """Get ERC1155 token balances for multiple token IDs"""
+        # Validate address first
+        owner_address = self._validate_address(owner_address)
+        
+        # Check cache first (shorter TTL for balances since they change frequently)
+        cache_key = f"erc1155_balances_{contract_name}_{owner_address.lower()}_{','.join(map(str, token_ids))}"
+        if cache_key in self.cache:
+            logger.debug(f"🎯 Cache hit for {cache_key}")
+            return self.cache[cache_key]
+        
+        # ERC1155 ABI for balanceOfBatch
+        erc1155_abi = [
+            {
+                "inputs": [
+                    {"internalType": "address[]", "name": "accounts", "type": "address[]"},
+                    {"internalType": "uint256[]", "name": "ids", "type": "uint256[]"}
+                ],
+                "name": "balanceOfBatch",
+                "outputs": [{"internalType": "uint256[]", "name": "", "type": "uint256[]"}],
+                "stateMutability": "view",
+                "type": "function"
+            }
+        ]
+        
+        try:
+            contract = self._get_contract(contract_name, erc1155_abi)
+            
+            # Prepare arrays for balanceOfBatch call
+            addresses = [owner_address] * len(token_ids)
+            
+            # Call balanceOfBatch function
+            contract_function = contract.functions.balanceOfBatch(addresses, token_ids)
+            result = await self._call_contract_function_with_retry(contract_function)
+            
+            # Convert to list of integers
+            balances = [int(balance) for balance in result] if result else [0] * len(token_ids)
+            
+            # Cache the result (shorter TTL for balances)
+            self.cache[cache_key] = balances
+            
+            logger.info(f"✅ ERC1155 balances for {owner_address} in {contract_name}: {dict(zip(token_ids, balances))}")
+            return balances
+            
+        except ValueError as e:
+            # Address validation error - this is a client error
+            logger.error(f"❌ Address validation failed: {e}")
+            raise ValueError(str(e))
+        except Exception as e:
+            logger.error(f"❌ Failed to get ERC1155 balances for {owner_address}: {e}")
+            raise Web3ServiceException(f"Failed to get ERC1155 balances: {e}")
+    
+    # =============================================================================
+    # ERC20 TOKEN METHODS (existing)
     # =============================================================================
     
     async def get_erc20_balance(self, token_name: str, owner_address: str) -> int:

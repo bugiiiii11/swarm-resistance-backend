@@ -1,6 +1,7 @@
 """
 Web3 API Routes for Swarm Resistance dApp
 Implements the three main endpoints using Moralis HTTP API
+Plus the new Land Tickets endpoint
 TEMPORARY: Authentication disabled for initial deployment
 """
 
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 from typing import Optional
 import logging
 from app.services.moralis_service import moralis_service
+from app.services.enhanced_moralis_service import enhanced_moralis_service
 # Temporarily commented out auth until we implement it
 # from app.services.auth_service import get_current_user
 
@@ -170,6 +172,62 @@ async def refresh_wallet_data(
             detail=f"Failed to refresh wallet data: {str(e)}"
         )
 
+# ============================================================================
+# NEW: LAND TICKETS ENDPOINT
+# ============================================================================
+
+@router.get("/v1/land_tickets/user_land_tickets/")
+async def get_user_land_tickets(
+    address: str = Query(..., description="Wallet address to fetch land tickets for")
+):
+    """
+    Get Land Tickets for a wallet address
+    
+    - **address**: Wallet address (required)
+    - Returns: Array of land ticket objects with live balances from blockchain
+    """
+    try:
+        logger.info(f"Fetching land tickets for address: {address}")
+        
+        # Validate wallet address format
+        if not address or len(address) != 42 or not address.startswith("0x"):
+            raise HTTPException(
+                status_code=400, 
+                detail="Invalid wallet address format. Address must be 42 characters starting with 0x"
+            )
+        
+        # Fetch land tickets using enhanced moralis service
+        land_tickets = await enhanced_moralis_service.get_land_tickets(address)
+        
+        # Calculate total tickets for logging
+        total_tickets = sum(land.get("balance", 0) for land in land_tickets if land.get("balance", 0) > 0)
+        error_count = sum(1 for land in land_tickets if land.get("balance", -1) == -1)
+        
+        if error_count > 0:
+            logger.warning(f"Retrieved land tickets with {error_count} errors for {address}")
+        else:
+            logger.info(f"Successfully fetched {len(land_tickets)} land types with {total_tickets} total tickets")
+        
+        return JSONResponse(
+            status_code=200,
+            content=land_tickets  # Direct array response (like weapons endpoint)
+        )
+        
+    except ValueError as e:
+        logger.error(f"Validation error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    
+    except Exception as e:
+        logger.error(f"Error fetching land tickets: {str(e)}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to fetch land tickets: {str(e)}"
+        )
+
+# ============================================================================
+# EXISTING UTILITY ENDPOINTS
+# ============================================================================
+
 @router.get("/web3/cache/stats")
 async def get_cache_stats():
     """
@@ -179,12 +237,16 @@ async def get_cache_stats():
     """
     try:
         cache_stats = moralis_service.get_cache_stats()
+        enhanced_cache_stats = await enhanced_moralis_service.get_cache_statistics()
         
         return JSONResponse(
             status_code=200,
             content={
                 "success": True,
-                "data": cache_stats,
+                "data": {
+                    "moralis_service": cache_stats,
+                    "enhanced_moralis_service": enhanced_cache_stats
+                },
                 "message": "Cache statistics retrieved successfully"
             }
         )
@@ -239,6 +301,7 @@ async def health_check():
                 "service": "Web3 Moralis Service",
                 "status": "healthy",
                 "cache_stats": cache_stats,
+                "land_tickets_enabled": True,
                 "message": "Web3 service is running normally"
             }
         )
