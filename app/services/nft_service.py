@@ -1058,7 +1058,7 @@ class NFTService:
         try:
             if token_ids:
                 # Invalidate specific tokens
-                placeholders = ','.join([' + str(i+1) for i in range(len(token_ids))])
+                placeholders = ','.join(['$' + str(i+1) for i in range(len(token_ids))])
                 
                 if contract_type == 'heroes':
                     query = f"UPDATE heroes_token_cache SET is_valid = FALSE WHERE bc_id IN ({placeholders})"
