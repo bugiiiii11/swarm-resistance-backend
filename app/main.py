@@ -15,8 +15,7 @@ from app.config import settings
 from app.database import init_db
 
 # Import route modules
-from app.routes.web3_routes import router as web3_router
-from app.routes.medashooter_routes import router as medashooter_router
+from app.routes.api_routes import router as api_router
 # Import other routes as needed
 # from app.routes.auth_routes import router as auth_router
 # from app.routes.user_routes import router as user_router
@@ -52,8 +51,7 @@ app.add_middleware(
 )
 
 # Include routers
-app.include_router(web3_router, tags=["Web3 Services"])
-app.include_router(medashooter_router, tags=["MedaShooter Game Integration"])
+app.include_router(api_router, tags=["Unified API"])
 # app.include_router(auth_router)
 # app.include_router(user_router)
 
